@@ -1,13 +1,15 @@
-# MeTo 题库 API 与 OCS 集成说明
+# MeTo 题库 API 与南城派网课助手集成说明
 
-> 基于现有接口行为整理，并结合本仓库当前脚本接入方式补充。  
-> 参考文件：`D:\学习通刷课\废2\tiku_test.html`。该文件现在仅作为接口行为参考，不再是脚本运行依赖。
+> 本项目基于开源项目 `OCSJS` 二次开发：`https://github.com/ocsjs/ocsjs`  
+> 当前仓库：`https://github.com/ncccp1/ocs`  
+> 参考文件：`D:\学习通刷课\废2\tiku_test.html`，该文件仅作为接口行为参考，不再是脚本运行依赖。
 
 ---
 
 ## 当前脚本接入结论
 
-- OCS 已支持 **直接请求远程 MeTo 题库**，不再依赖本地端口、本地 CORS 代理或额外启动服务。
+- 南城派网课助手已支持 **直接请求远程 MeTo 题库**
+- 不再依赖本地端口、本地 CORS 代理或额外启动服务
 - 当前接入同时支持：
   - 自动答题时搜题
   - “搜索结果”面板内手动单题搜题
@@ -158,8 +160,8 @@ function generateToken(timeErrorRate = 0) {
 
 #### 说明
 
-- 单题搜索时，脚本会优先尝试精确收敛到与题干标准化后完全一致的结果。
-- 若服务端返回 `hideAnswer: true`，脚本会继续请求 `queryProblemAnswer` 获取真实答案。
+- 单题搜索时，脚本会优先尝试精确收敛到与题干标准化后完全一致的结果
+- 若服务端返回 `hideAnswer: true`，脚本会继续请求 `queryProblemAnswer` 获取真实答案
 
 ### 2. 获取真实答案：`POST /tiku/api/v1/queryProblemAnswer`
 
@@ -176,7 +178,7 @@ function generateToken(timeErrorRate = 0) {
 
 ---
 
-## OCS 当前实现细节
+## 当前实现细节
 
 ### 重试与主备切换
 
@@ -191,11 +193,11 @@ function generateToken(timeErrorRate = 0) {
   - `5xx`
   - `52x`
   - `200` 但响应体为空
-- 当前每个服务地址最多重试 `2` 次，之后自动切到备用域名。
+- 当前每个服务地址最多重试 `2` 次，之后自动切到备用域名
 
 ### 时间校准
 
-- 若服务端因时间误差拒绝请求，脚本会尝试从响应中提取服务端时间并更新本地 `time_error_rate`，随后自动重试。
+- 若服务端因时间误差拒绝请求，脚本会尝试从响应中提取服务端时间并更新本地 `time_error_rate`，随后自动重试
 
 ### 手动搜题入口
 
@@ -203,7 +205,7 @@ function generateToken(timeErrorRate = 0) {
 - 支持：
   - 单题搜索
   - 批量搜索（每行一题）
-- 结果仍复用原有“搜索结果”展示组件，便于和自动答题结果统一查看。
+- 结果复用原有“搜索结果”展示组件，便于和自动答题结果统一查看
 
 ### 搜题日志入口
 
@@ -219,13 +221,14 @@ function generateToken(timeErrorRate = 0) {
 
 ## 跨域权限说明
 
-- 推荐直接使用 `ocs.common.user.js`
+- 推荐直接使用 `nanchengpai.common.user.js`
 - 如果使用普通版脚本，请确保具备以下 `@connect`：
   - `m.metst.cn`
   - `m.metost.com`
+  - `raw.githubusercontent.com`
 
 ---
 
 ## 旧方案说明
 
-旧的本地 `cors_proxy.js` / 本地端口方案现在仅保留为历史参考，当前 OCS 脚本运行时 **不再依赖** 该方案。
+旧的本地 `cors_proxy.js` / 本地端口方案现在仅保留为历史参考，当前脚本运行时 **不再依赖** 该方案。

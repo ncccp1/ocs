@@ -1,7 +1,7 @@
 {
 	"name": "@ocsjs/core",
 	"version": "4.0.4",
-	"description": "core package of ocs",
+	"description": "core package of 南城派网课助手",
 	"main": "./lib/index.js",
 	"types": "./lib/index.d.ts",
 	"files": [
@@ -10,24 +10,22 @@
 	],
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ocsjs/ocsjs.git"
+		"url": "git+https://github.com/ncccp1/ocs.git"
 	},
 	"keywords": [
+		"nanchengpai",
 		"ocs",
 		"script",
 		"playwright",
-		"puppeteer",
 		"electron",
-		"vue",
-		"ant-design-vue",
 		"typescript"
 	],
-	"author": "enncy",
+	"author": "ncccp1",
 	"license": "MIT",
 	"bugs": {
-		"url": "https://github.com/ocsjs/ocsjs/issues"
+		"url": "https://github.com/ncccp1/ocs/issues"
 	},
-	"homepage": "https://github.com/ocsjs/ocsjs#readme",
+	"homepage": "https://github.com/ncccp1/ocs#readme",
 	"devDependencies": {
 		"@types/event-emitter": "^0.3.3",
 		"@types/lodash": "^4.14.194",

@@ -71,20 +71,15 @@ async function createUserJs() {
 				gap: '\t'.repeat(4)
 			},
 			metadata: {
-				name: '南城畔网课助手',
+				name: '南城派网课助手',
 				version: version,
-				description: [
-					'南城畔网课助手，基于 OCS 修改，支持 ',
-					projectList,
-					'等网课的学习、作业、考试。'
-				].join(' '),
-				author: '南城畔',
+				description: ['南城派网课助手，基于 OCSJS 二次开发，支持 ', projectList, '等网课的学习、作业、考试。'].join(' '),
+				author: 'ncccp1',
 				license: 'MIT',
-				namespace: 'https://enncy.cn',
-				homepage: 'https://docs.ocsjs.com',
-				source: 'https://github.com/ocsjs/ocsjs',
-				icon: 'https://cdn.ocsjs.com/logo.png',
-				connect: ['enncy.cn', 'icodef.com', 'ocsjs.com', "zaizhexue.top", 'localhost', '127.0.0.1'],
+				namespace: 'https://github.com/ncccp1/ocs',
+				homepage: 'https://github.com/ncccp1/ocs',
+				source: 'https://github.com/ncccp1/ocs',
+				connect: ['raw.githubusercontent.com', 'github.com', 'm.metst.cn', 'm.metost.com', 'v.metst.cn', 'localhost', '127.0.0.1'],
 				match: matchMetadata,
 				grant: [
 					'GM_info',
@@ -107,7 +102,7 @@ async function createUserJs() {
 				antifeature: 'payment'
 			},
 			entry: path.join(__dirname, '../packages/scripts/entry.js'),
-			dist: path.join(__dirname, distPath, 'ocs.user.js')
+			dist: path.join(__dirname, distPath, 'nanchengpai.user.js')
 		};
 	};
 
@@ -121,9 +116,11 @@ async function createUserJs() {
 	devOpts.parseResource = false;
 	devOpts.metadata.name = devOpts.metadata.name + '(dev)';
 	devOpts.metadata.require = [pathToFileURL(path.join(distResolvedPath, 'index.js')).href];
-	devOpts.metadata.resource = [`STYLE ${pathToFileURL(path.join(__dirname, '../packages/scripts/assets/css/style.css')).href}`];
+	devOpts.metadata.resource = [
+		`STYLE ${pathToFileURL(path.join(__dirname, '../packages/scripts/assets/css/style.css')).href}`
+	];
 	devOpts.entry = path.join(__dirname, '../packages/scripts/entry.dev.js');
-	devOpts.dist = path.join(distResolvedPath, 'ocs.dev.user.js');
+	devOpts.dist = path.join(distResolvedPath, 'nanchengpai.dev.user.js');
 	/** 导出样式文件 */
 	fs.copyFileSync(
 		path.join(__dirname, '../packages/scripts/assets/css/style.css'),
@@ -139,7 +136,7 @@ async function createUserJs() {
 	connect.push('*');
 	commonOpts.metadata.connect = connect;
 	commonOpts.entry = path.join(__dirname, '../packages/scripts/entry.common.js');
-	commonOpts.dist = path.join(distResolvedPath, 'ocs.common.user.js');
+	commonOpts.dist = path.join(distResolvedPath, 'nanchengpai.common.user.js');
 
 	console.log('createUserScript: ', commonOpts.metadata.name, commonOpts.dist);
 	await createUserScript(commonOpts);

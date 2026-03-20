@@ -1,7 +1,7 @@
 {
-	"name": "ocsjs",
+	"name": "nanchengpai-course-helper",
 	"version": "4.12.16",
-	"description": "ocs - online course script 在线网络课程辅助工具",
+	"description": "南城派网课助手，基于 OCSJS 二次开发的网课辅助项目",
 	"types": "./lib/src/core/index.d.ts",
 	"main": "./lib/src/core/index.js",
 	"files": [
@@ -11,6 +11,8 @@
 	"scripts": {
 		"dev": "gulp -f ./scripts/dev-core.js & npm run changelog:simplify",
 		"build": "gulp -f ./scripts/build-core.js",
+		"mock:answerer": "node scripts/mock-answerer-server.js",
+		"mock:answerer:smoke": "node scripts/mock-answerer-server.smoke.js",
 		"tsc": "pnpm lint && gulp -f ./scripts/tsc.js",
 		"lint": "pnpm format && eslint  ./packages --ext .ts,.tsx,.js,.jsx --fix",
 		"format": "prettier -c ./.prettierrc.json  **/*.ts  **/*.js  **/*.css  --write",
@@ -47,24 +49,22 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ocsjs/ocsjs.git"
+		"url": "git+https://github.com/ncccp1/ocs.git"
 	},
 	"keywords": [
+		"nanchengpai",
 		"ocs",
 		"script",
 		"playwright",
-		"puppeteer",
 		"electron",
-		"vue",
-		"ant-design-vue",
 		"typescript"
 	],
-	"author": "enncy",
+	"author": "ncccp1",
 	"license": "MIT",
 	"bugs": {
-		"url": "https://github.com/ocsjs/ocsjs/issues"
+		"url": "https://github.com/ncccp1/ocs/issues"
 	},
-	"homepage": "https://github.com/ocsjs/ocsjs#readme",
+	"homepage": "https://github.com/ncccp1/ocs#readme",
 	"config": {
 		"commitizen": {
 			"path": "./node_modules/cz-conventional-changelog"

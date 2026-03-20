@@ -3,13 +3,14 @@
     "allow": [
       "Bash(find /d/学习通刷课/ocsjs -type f -name *.user.js)",
       "Bash(grep -n \"require.*file:///\" /d/学习通刷课/ocsjs/scripts/build-core.js)",
-      "Bash(xxd \"d:/学习通刷课/ocsjs/dist/ocs.dev.user.js\")",
-      "Bash(grep -n \"^//\" /d/学习通刷课/ocsjs/dist/ocs.dev.user.js)",
+      "Bash(xxd \"d:/学习通刷课/ocsjs/dist/nanchengpai.dev.user.js\")",
+      "Bash(grep -n \"^//\" /d/学习通刷课/ocsjs/dist/nanchengpai.dev.user.js)",
       "Read(//d/学習通刷課/ocsjs/dist/**)",
-      "Bash(awk 'NR>=60 && NR<=75' 'd:/学习通刷课/ocsjs/dist/ocs.dev.user.js')",
-      "Bash(awk 'NR>=60 && NR<=75' 'd:/学习通刷课/ocsjs/dist/ocs.user.js')",
+      "Bash(awk 'NR>=60 && NR<=75' 'd:/学习通刷课/ocsjs/dist/nanchengpai.dev.user.js')",
+      "Bash(awk 'NR>=60 && NR<=75' 'd:/学习通刷课/ocsjs/dist/nanchengpai.user.js')",
       "Bash(python3:*)",
-      "Bash(xxd)"
+      "Bash(xxd)",
+      "Bash(find /d/学习通刷课/ocsjs -name *.user.js -o -name nanchengpai.user.js)"
     ],
     "additionalDirectories": [
       "\\tmp"

@@ -23,6 +23,12 @@ import {
 } from '../utils/answerer';
 
 const TAB_WORK_RESULTS_KEY = 'common.work-results.results';
+const PROJECT_NAME = '南城派网课助手';
+const PROJECT_REPO = 'https://github.com/ncccp1/ocs';
+const PROJECT_ISSUES = 'https://github.com/ncccp1/ocs/issues';
+const PROJECT_CHANGELOG = 'https://raw.githubusercontent.com/ncccp1/ocs/main/CHANGELOG.md';
+const PROJECT_SETTING_EXTENSION = '.ncpsetting';
+const PROJECT_SETTING_IMPORT_ACCEPT = '.ncpsetting,.ocssetting';
 
 const state = {
 	workResult: {
@@ -212,7 +218,7 @@ export const CommonProject = Project.create({
 				notes: {
 					defaultValue: $ui.notes([
 						'打开任意网课平台，进入视频、作业页面等待脚本运行，',
-						'任何疑问请查看上方交流群，进群后带截图进行反馈。',
+						'如遇问题请通过项目主页或问题反馈页面提交截图说明。',
 						'温馨提示: ',
 						'⚠️ 禁止与其他脚本一起使用，否则会不兼容导致无法运行！',
 						'⚠️ 禁止最小化浏览器、切屏，否则可能导致脚本无法运行！'
@@ -312,7 +318,7 @@ export const CommonProject = Project.create({
 									[
 										h('div', [
 											'题库配置填写教程：',
-											h('a', { href: 'https://docs.ocsjs.com/docs/work' }, 'https://docs.ocsjs.com/docs/work')
+											h('a', { href: PROJECT_REPO, target: '_blank' }, PROJECT_REPO)
 										])
 									],
 									[
@@ -540,9 +546,9 @@ export const CommonProject = Project.create({
 																			h(
 																				'a',
 																				{
-																					href: 'https://docs.ocsjs.com/docs/other/api#全域名通用版本'
+																					href: PROJECT_REPO
 																				},
-																				'OCS全域名通用版本'
+																				'南城派全域名通用版'
 																			),
 																			'，或者手动添加 @connect ，否则无法进行请求。',
 																			h(
@@ -830,6 +836,25 @@ export const CommonProject = Project.create({
 					label: '题库缓存功能',
 					defaultValue: true,
 					attrs: { type: 'checkbox', title: '详情请前往 通用-其他应用-题库拓展查看。' }
+				},
+				autoStart: {
+					separator: '运行控制',
+					label: '自动开始',
+					defaultValue: true,
+					attrs: {
+						type: 'checkbox',
+						title: '进入学习/答题页面后是否自动开始运行，关闭后需手动点击开始按钮'
+					}
+				},
+				scheduledShutdown: {
+					label: '定时关闭',
+					defaultValue: false,
+					attrs: { type: 'checkbox', title: '到达设定时间后自动关闭页面，停止刷课' }
+				},
+				shutdownTime: {
+					label: '关闭时间',
+					defaultValue: '23:30',
+					attrs: { type: 'time', title: '到达此时间后关闭页面（格式 HH:MM）' }
 				}
 			},
 			methods() {
@@ -907,6 +932,26 @@ export const CommonProject = Project.create({
 				this.onConfigChange('answerWrapperHandlerTimeout', (sec) => {
 					AnswerWrapperHandlerConfig.timeout_seconds = sec;
 				});
+
+				// 定时关闭检查
+				const checkShutdown = () => {
+					if (this.cfg.scheduledShutdown && this.cfg.shutdownTime) {
+						const now = new Date();
+						const parts = this.cfg.shutdownTime.split(':').map(Number);
+						if (now.getHours() === parts[0] && now.getMinutes() === parts[1]) {
+							$message.warn({ content: '定时关闭：即将关闭页面...', duration: 5 });
+							setTimeout(() => {
+								try {
+									window.close();
+								} catch {
+									// window.close() 可能被浏览器阻止
+									$message.warn({ content: '浏览器阻止了自动关闭，请手动关闭页面。', duration: 0 });
+								}
+							}, 5000);
+						}
+					}
+				};
+				setInterval(checkShutdown, 30 * 1000);
 			},
 			onrender({ panel }) {
 				// 因为需要用到 GM_xhr 所以判断是否处于用户脚本环境
@@ -1596,7 +1641,7 @@ export const CommonProject = Project.create({
 								changelog
 							])
 						});
-						const md = await request('https://cdn.ocsjs.com/articles/ocs/changelog.md?t=' + Date.now(), {
+						const md = await request(PROJECT_CHANGELOG + '?t=' + Date.now(), {
 							type: 'GM_xmlhttpRequest',
 							responseType: 'text',
 							method: 'get'
@@ -1691,7 +1736,7 @@ export const CommonProject = Project.create({
 						{
 							innerText: '📤 导出全部设置',
 							style: btnStyle,
-							title: '导出全部页面的设置，包括全局设置，题库配置，学习设置等等。（文件后缀名为：.ocssetting）'
+							title: `导出全部页面的设置，包括全局设置，题库配置，学习设置等等。（文件后缀名为：${PROJECT_SETTING_EXTENSION}）`
 						},
 						(btn) => {
 							btn.onclick = () => {
@@ -1704,7 +1749,10 @@ export const CommonProject = Project.create({
 								}
 								const blob = new Blob([JSON.stringify(setting, null, 2)], { type: 'text/plain' });
 								const url = URL.createObjectURL(blob);
-								const a = h('a', { href: url, download: 'ocs-setting-export.ocssetting' });
+								const a = h('a', {
+									href: url,
+									download: `nanchengpai-setting-export${PROJECT_SETTING_EXTENSION}`
+								});
 								a.click();
 								URL.revokeObjectURL(url);
 							};
@@ -1718,11 +1766,11 @@ export const CommonProject = Project.create({
 						{
 							innerText: '📥 导入全部设置',
 							style: btnStyle,
-							title: '导入并且覆盖当前的全部设置。（文件后缀名为：.ocssetting）'
+							title: `导入并且覆盖当前的全部设置。（文件后缀名优先为：${PROJECT_SETTING_EXTENSION}，同时兼容旧版 .ocssetting）`
 						},
 						(btn) => {
 							btn.onclick = () => {
-								const input = h('input', { type: 'file', accept: '.ocssetting' });
+								const input = h('input', { type: 'file', accept: PROJECT_SETTING_IMPORT_ACCEPT });
 								input.onchange = async () => {
 									const file = input.files?.[0];
 									if (file) {
@@ -1900,11 +1948,11 @@ const createGuide = () => {
 		});
 	};
 
-	const gotoHome = h('button', { className: 'base-style-button-secondary' }, '🏡官网教程');
-	gotoHome.onclick = () => window.open('https://docs.ocsjs.com', '_blank');
+	const gotoHome = h('button', { className: 'base-style-button-secondary' }, '🏡项目主页');
+	gotoHome.onclick = () => window.open(PROJECT_REPO, '_blank');
 
-	const contactUs = h('button', { className: 'base-style-button-secondary' }, '🗨️交流群');
-	contactUs.onclick = () => window.open('https://docs.ocsjs.com/docs/about#交流方式', '_blank');
+	const contactUs = h('button', { className: 'base-style-button-secondary' }, '🗨️问题反馈');
+	contactUs.onclick = () => window.open(PROJECT_ISSUES, '_blank');
 
 	const changeLog = h('button', { className: 'base-style-button-secondary' }, '📄更新日志');
 	changeLog.onclick = () => CommonProject.scripts.apps.methods.showChangelog();
@@ -1917,6 +1965,9 @@ const createGuide = () => {
 	};
 
 	return h('div', { className: 'user-guide' }, [
+		h('div', { className: 'notes card', style: { ...cardStyle, marginBottom: '12px' } }, [
+			`${PROJECT_NAME} 基于 OCSJS 二次开发，如需查看说明或反馈问题，请使用下方快捷入口。`
+		]),
 		h('div', { style: cardStyle }, [
 			h('div', { style: { marginBottom: '4px', fontWeight: 'bold' } }, [
 				'✨兼容的网课平台：',

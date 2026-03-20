@@ -6,7 +6,7 @@
 	"cleanOutputDir": true,
 	"darkHighlightTheme": "github-dark",
 	"lightHighlightTheme": "github-light",
-	"name": "OCS - API",
+	"name": "南城派网课助手 - API",
 	"readme": "../../README.md",
 	"customCss": "./assets/docs.css",
 	"kindSortOrder": ["Variable", "Property", "Method", "Function"]

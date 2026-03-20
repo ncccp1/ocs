@@ -18,6 +18,7 @@ export interface CommonWorkOptions {
 export function workPreCheckMessage(
 	options: CommonWorkOptions & {
 		start_delay_seconds?: number;
+		autoStart?: boolean;
 		onrun: (opts: CommonWorkOptions) => void;
 		/**
 		 * 当没有题库配置时的回调
@@ -29,12 +30,19 @@ export function workPreCheckMessage(
 		onclose?: (opts: CommonWorkOptions, closedMessage: MessageElement) => void;
 	}
 ) {
-	const { onrun, onNoAnswererWrappers, onclose, ...opts } = options;
+	const { onrun, onNoAnswererWrappers, onclose, autoStart, ...opts } = options;
 
 	if (opts.answererWrappers.length === 0) {
 		onNoAnswererWrappers?.(opts);
 		return answerWrapperEmptyWarning(0);
 	} else {
+		// 检查自动开始设置
+		if (autoStart === false) {
+			return $message.info({
+				content: '自动答题已就绪，请手动点击开始按钮。',
+				duration: 0
+			});
+		}
 		options.start_delay_seconds = options.start_delay_seconds ?? 5;
 		return $message.info({
 			duration: options.start_delay_seconds,

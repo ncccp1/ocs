@@ -135,7 +135,7 @@ export const CXProject = Project.create({
 					while (_self.parent !== undefined && _try_count > 0) {
 						if (_self.location.href.includes('/mycourse/studentstudy')) {
 							top = _self;
-							console.log('[ocsjs] top change to :' + top.location.href);
+							console.log('[nanchengpai] top change to :' + top.location.href);
 							break;
 						} else {
 							_try_count--;
@@ -144,7 +144,7 @@ export const CXProject = Project.create({
 						}
 					}
 				} catch (e) {
-					console.warn('[ocsjs] fail of find top');
+					console.warn('[nanchengpai] fail of find top');
 					console.warn(e);
 					top = window.top;
 				}
@@ -470,7 +470,7 @@ export const CXProject = Project.create({
 				if (top === window) {
 					$message.warn({
 						content:
-							'OCS网课助手不支持旧版超星, 即将切换到超星新版, 如有其他第三方插件请关闭, 可能有兼容问题导致频繁切换。',
+							'南城派网课助手不支持旧版超星，即将切换到超星新版。如有其他第三方插件请关闭，可能有兼容问题导致频繁切换。',
 						duration: 0
 					});
 					// 跳转到最新版本的超星

@@ -19,12 +19,12 @@ if (
 	].some((api) => typeof Reflect.get(globalThis, api) === 'undefined')
 ) {
 	const open = confirm(
-		`南城畔网课助手不支持当前的脚本管理器（${GM_info.scriptHandler}）。` +
-			'请前往 https://docs.ocsjs.com/docs/script 下载指定的脚本管理器，例如 “Scriptcat 脚本猫” 或者 “Tampermonkey 油猴”'
+		`南城派网课助手不支持当前的脚本管理器（${GM_info.scriptHandler}）。` +
+			'请前往 https://github.com/ncccp1/ocs 查看安装说明，推荐使用 “Scriptcat 脚本猫” 或 “Tampermonkey 油猴”'
 	);
 
 	if (open) {
-		window.location.href = 'https://docs.ocsjs.com/docs/script';
+		window.location.href = 'https://github.com/ncccp1/ocs';
 	}
 	return;
 }
@@ -45,7 +45,7 @@ const infos = GM_info;
 			renderScript: RenderScript,
 			styles: [STYLE],
 			defaultPanelName: CommonProject.scripts.guide.namespace,
-			title: `南城畔-全域名通用版-${infos.script.version}`
+			title: `南城派-全域名通用版-${infos.script.version}`
 		},
 		updatePage: ''
 	});

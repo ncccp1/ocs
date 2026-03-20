@@ -201,19 +201,19 @@ export const BackgroundProject = Project.create({
 			name: '🔄️ 软件配置同步',
 			namespace: 'background.app',
 			matches: [['所有页面', /./]],
-			// 如果是在OCS软件中则不显示此页面
+			// 如果是在桌面启动器环境中则不显示此页面
 			hideInPanel: $gm.getInfos() === undefined,
 			configs: {
 				notes: {
 					defaultValue: $ui.notes([
 						[
-							h('span', [
-								'如果您使用',
-								h('a', { href: 'https://docs.ocsjs.com/docs/app', target: '_blank' }, 'OCS桌面软件'),
-								'启动浏览器，并使用此脚本，'
-							]),
-							'我们会同步软件中的配置到此脚本上，方便多个浏览器的管理。',
+							'如果您使用兼容的桌面启动器启动浏览器，并配合此脚本使用，',
+							'我们会同步启动器中的配置到此脚本上，方便多个浏览器的管理。',
 							'窗口设置以及后台面板所有设置不会进行同步。'
+						],
+						[
+							'项目说明：',
+							h('a', { href: 'https://github.com/ncccp1/ocs', target: '_blank' }, 'https://github.com/ncccp1/ocs')
 						],
 						'如果不是，您可以忽略此脚本。'
 					]).outerHTML
@@ -305,8 +305,8 @@ export const BackgroundProject = Project.create({
 							return;
 						}
 
-						// 自OCS软件 2.8.21 版本后特殊字段，用于标记不进行同步的字段
-						// 通过OCS playwright 启动的浏览器会自动返回数据
+						// 自桌面启动器 2.8.21 版本后特殊字段，用于标记不进行同步的字段
+						// 通过 Playwright 启动的浏览器会自动返回数据
 						// 不使用 http 防止某些 Content-Security-Policy 限制
 						const environment_res = await request('/ocs-environment', {
 							type: 'fetch',
@@ -381,7 +381,7 @@ export const BackgroundProject = Project.create({
 											panel.configsContainer.prepend(panel.lockWrapper);
 
 											panel.lockWrapper.title =
-												'🚫已同步OCS桌面版软件配置，如需修改请在桌面版软件的左侧栏设置-通用设置-OCS配置，中进行修改。\n\n或者前往脚本悬浮窗:后台-软件配置同步 关闭配置同步功能。\n\n可双击强制修改，并关闭同步配置';
+												'🚫已同步桌面启动器配置，如需修改请优先在启动器的通用设置中处理。\n\n或者前往脚本悬浮窗:后台-软件配置同步 关闭配置同步功能。\n\n可双击强制修改，并关闭同步配置';
 											panel.lockWrapper = $ui.tooltip(panel.lockWrapper);
 											panel.lockWrapper.addEventListener('dblclick', () => {
 												panel.configsContainer.classList.remove('lock');
@@ -437,10 +437,19 @@ export const BackgroundProject = Project.create({
 			methods() {
 				return {
 					getLastVersion: async () => {
-						return (await request('https://cdn.ocsjs.com/ocs-version.json?t=' + Date.now(), {
-							method: 'get',
-							type: 'GM_xmlhttpRequest'
-						})) as { 'last-version': string; resource: Record<string, string>; notes: string[] };
+						const pkg = (await request(
+							'https://raw.githubusercontent.com/ncccp1/ocs/main/package.json?t=' + Date.now(),
+							{
+								method: 'get',
+								type: 'GM_xmlhttpRequest',
+								responseType: 'json'
+							}
+						)) as { version?: string };
+						return {
+							'last-version': pkg?.version || 'unknown',
+							resource: {},
+							notes: []
+						} as { 'last-version': string; resource: Record<string, string>; notes: string[] };
 					}
 				};
 			},
@@ -481,7 +490,7 @@ export const BackgroundProject = Project.create({
 			matches: [['所有页面', /./]],
 			configs: {
 				notes: {
-					defaultValue: '开发人员调试用。<br>注入OCS_CONTEXT全局变量。用户可忽略此页面。'
+					defaultValue: '开发人员调试用。<br>注入 NCP_CONTEXT（同时兼容 OCS_CONTEXT）全局变量。用户可忽略此页面。'
 				},
 				show_debug_cursor: {
 					defaultValue: true,
@@ -499,6 +508,7 @@ export const BackgroundProject = Project.create({
 			onrender({ panel }) {
 				const injectBtn = h('button', { className: 'base-style-button' }, '点击注入全局变量');
 				injectBtn.addEventListener('click', () => {
+					$gm.unsafeWindow.NCP_CONTEXT = self;
 					$gm.unsafeWindow.OCS_CONTEXT = self;
 				});
 

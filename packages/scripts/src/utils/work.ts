@@ -1,9 +1,187 @@
-import { SimplifyWorkResult, WorkerEvents, WorkResult } from '@ocsjs/core';
+import { SimplifyWorkResult, WorkerEvents, WorkResult, SearchInformation } from '@ocsjs/core';
 import { $ui, $message, MessageElement, Script, h, CommonEventEmitter, cors, $elements } from 'easy-us';
 import { CommonProject } from '../projects/common';
 import { CommonWorkOptions, workPreCheckMessage } from '.';
+import { searchAnswerInWrappers } from './answerer';
 
 export let globalControlPanel: HTMLElement | null = null;
+let globalFloatingBar: HTMLElement | null = null;
+
+const floatingBtnStyle: Partial<CSSStyleDeclaration> = {
+	padding: '6px 14px',
+	border: 'none',
+	borderRadius: '16px',
+	color: '#fff',
+	fontSize: '13px',
+	cursor: 'pointer',
+	transition: 'opacity 0.2s'
+};
+
+/**
+ * 创建全局悬浮控制条（底部固定），包含手动搜题 + 开始/暂停
+ */
+function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
+	if (globalFloatingBar) globalFloatingBar.remove();
+
+	// --- 开始/暂停按钮 ---
+	const pauseBtn = h('button', { style: { ...floatingBtnStyle, background: '#7c4dff' } }, '⏸ 暂停');
+	pauseBtn.onclick = () => {
+		onStartPause();
+		pauseBtn.textContent = getState() ? '▶ 继续' : '⏸ 暂停';
+	};
+
+	// --- 手动搜题区域 ---
+	const searchInput = h('input', {
+		placeholder: '输入题目搜题...',
+		style: {
+			flex: '1',
+			minWidth: '120px',
+			padding: '4px 8px',
+			border: '1px solid #555',
+			borderRadius: '12px',
+			background: '#222',
+			color: '#eee',
+			fontSize: '12px',
+			outline: 'none'
+		}
+	}) as HTMLInputElement;
+
+	const searchResultBox = h('div', {
+		style: {
+			display: 'none',
+			position: 'absolute',
+			bottom: '48px',
+			right: '0',
+			width: '460px',
+			maxHeight: '400px',
+			overflowY: 'auto',
+			background: '#1a1a2e',
+			border: '1px solid #444',
+			borderRadius: '10px',
+			padding: '10px',
+			boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+			fontSize: '13px',
+			color: '#e0e0e0',
+			zIndex: '999999'
+		}
+	});
+
+	const searchBtn = h('button', { style: { ...floatingBtnStyle, background: '#00bfa5' } }, '搜索');
+	searchBtn.onclick = async () => {
+		const value = searchInput.value.trim();
+		if (!value) return;
+		const aws = CommonProject.scripts.settings.cfg.answererWrappers;
+		if (!aws.length) {
+			searchResultBox.style.display = 'block';
+			searchResultBox.innerHTML = '<span style="color:#ff7b72">请先配置题库</span>';
+			return;
+		}
+		searchBtn.textContent = '搜索中...';
+		searchBtn.setAttribute('disabled', 'true');
+		try {
+			const infos: SearchInformation[] = await searchAnswerInWrappers(aws, { title: value }, 'manual-single');
+			const totalResults = infos.map((i) => i.results).flat().length;
+			const resultItems: HTMLElement[] = [];
+			for (const info of infos) {
+				for (const res of info.results) {
+					resultItems.push(
+						h(
+							'div',
+							{
+								style: {
+									borderLeft: '3px solid #7c4dff',
+									padding: '6px 10px',
+									marginBottom: '6px',
+									borderRadius: '0 4px 4px 0',
+									background: '#16213e'
+								}
+							},
+							[
+								h('div', { style: { color: '#bb86fc', fontSize: '12px', marginBottom: '2px' } }, info.name),
+								h('div', { style: { color: '#ccc', fontSize: '13px' } }, res.question || value),
+								h(
+									'div',
+									{ style: { color: '#7ee787', fontSize: '13px', marginTop: '2px' } },
+									res.answer ? '答案: ' + res.answer : '未搜索到答案'
+								)
+							]
+						)
+					);
+				}
+			}
+			searchResultBox.style.display = 'block';
+			searchResultBox.replaceChildren(
+				h('div', { style: { marginBottom: '6px', color: '#aaa' } }, `搜索到 ${totalResults} 个结果`),
+				...resultItems
+			);
+		} catch (e: any) {
+			searchResultBox.style.display = 'block';
+			searchResultBox.innerHTML = `<span style="color:#ff7b72">搜索失败: ${e?.message || e}</span>`;
+		}
+		searchBtn.textContent = '搜索';
+		searchBtn.removeAttribute('disabled');
+	};
+	searchInput.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter') searchBtn.click();
+	});
+
+	// --- 关闭搜索结果 ---
+	const closeResultBtn = h(
+		'button',
+		{
+			style: {
+				...floatingBtnStyle,
+				background: '#555',
+				padding: '4px 10px',
+				fontSize: '11px',
+				display: 'none'
+			}
+		},
+		'✕'
+	);
+	closeResultBtn.onclick = () => {
+		searchResultBox.style.display = 'none';
+		closeResultBtn.style.display = 'none';
+	};
+	// 搜索结果出现时显示关闭按钮
+	new MutationObserver(() => {
+		closeResultBtn.style.display = searchResultBox.style.display === 'none' ? 'none' : 'inline-block';
+	}).observe(searchResultBox, { attributes: true, attributeFilter: ['style'] });
+
+	// --- 整体布局 ---
+	const bar = h(
+		'div',
+		{
+			style: {
+				position: 'fixed',
+				bottom: '12px',
+				right: '12px',
+				zIndex: '999999',
+				display: 'flex',
+				gap: '6px',
+				padding: '6px 12px',
+				background: 'rgba(0,0,0,0.82)',
+				borderRadius: '24px',
+				boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+				alignItems: 'center',
+				flexWrap: 'wrap',
+				maxWidth: '480px'
+			}
+		},
+		[
+			h('span', { style: { color: '#aaa', fontSize: '11px', marginRight: '2px', fontWeight: 'bold' } }, '南城派'),
+			pauseBtn,
+			searchInput,
+			searchBtn,
+			closeResultBtn,
+			searchResultBox
+		]
+	);
+
+	globalFloatingBar = bar;
+	document.body.appendChild(bar);
+	return { bar, btn: pauseBtn };
+}
 
 /**
  * 通用作业考试工具方法
@@ -118,6 +296,7 @@ export function commonWork(
 			checkFailed = true;
 		},
 		...workOptions,
+		autoStart: CommonProject.scripts.settings.cfg.autoStart,
 		start_delay_seconds: options.start_delay_seconds
 	});
 
@@ -134,10 +313,25 @@ export function commonWork(
 		// 更新状态
 		script.panel?.body?.replaceChildren(container, workResultPanel());
 
+		// 创建悬浮控制条
+		let paused = false;
+		const floatingCtrl = createFloatingBar(
+			() => {
+				paused = !paused;
+				worker?.emit?.(paused ? 'stop' : 'continuate');
+				controlBtn.value = paused ? '▶️继续' : '⏸️暂停';
+			},
+			() => paused
+		);
+
 		worker?.once('done', () => {
 			running = false;
 			globalControlPanel = null;
 			controlBtn.disabled = true;
+			floatingCtrl.btn.textContent = '✓ 完成';
+			floatingCtrl.btn.style.background = '#4caf50';
+			floatingCtrl.btn.onclick = null;
+			setTimeout(() => floatingCtrl.bar.remove(), 5000);
 		});
 	};
 }
