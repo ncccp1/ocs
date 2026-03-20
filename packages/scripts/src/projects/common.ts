@@ -1,6 +1,5 @@
 import debounce from 'lodash/debounce';
 import {
-	defaultAnswerWrapperHandler,
 	AnswerWrapperParser,
 	request,
 	SimplifyWorkResult,
@@ -16,6 +15,12 @@ import { enableCopy } from '../utils';
 import { SearchInfosElement } from '../elements/search.infos';
 import { RenderScript } from '../render';
 import { dropdownStyle } from '../utils/configs';
+import {
+	calculateMetoPoolId,
+	createMetoAnswererWrapper,
+	getResolvedMetoAuthConfig,
+	searchQuestionsInWrappers
+} from '../utils/answerer';
 
 const TAB_WORK_RESULTS_KEY = 'common.work-results.results';
 
@@ -77,6 +82,123 @@ const state = {
  * 题库缓存类型
  */
 type QuestionCache = { title: string; answer: string; from: string; homepage: string; ai?: boolean };
+
+function createSearchInfosCard(question: string, infos: SearchInformation[]) {
+	return h(
+		'div',
+		[
+			h(SearchInfosElement, {
+				infos: infos.map((info) => ({
+					results: info.results.map((res) => [res.question, res.answer, res.extra_data] as [string, string, object]),
+					homepage: info.homepage,
+					name: info.name,
+					error: info.error
+				})),
+				question
+			})
+		],
+		(div) => {
+			div.classList.add('card');
+			div.style.width = '100%';
+			div.style.boxSizing = 'border-box';
+			div.style.marginBottom = '12px';
+		}
+	);
+}
+
+function createManualSearchEntry() {
+	const textarea = h(
+		'textarea',
+		{
+			className: 'modal-input',
+			placeholder: '输入单个题目直接搜；批量搜索时每行一题。',
+			style: {
+				minWidth: '300px',
+				width: 'calc(100% - 8px)',
+				maxWidth: '100%',
+				minHeight: '72px'
+			}
+		},
+		CommonProject.scripts.onlineSearch.cfg.searchValue || ''
+	);
+	const content = h('div', '', (div) => {
+		div.style.marginTop = '12px';
+	});
+
+	textarea.addEventListener('input', () => {
+		CommonProject.scripts.onlineSearch.cfg.searchValue = textarea.value;
+	});
+
+	const runSearch = async (mode: 'manual-single' | 'manual-batch') => {
+		const value = textarea.value.trim();
+		if (!value) {
+			content.replaceChildren(h('span', '题目不能为空！'));
+			return;
+		}
+
+		if (CommonProject.scripts.settings.cfg.answererWrappers.length === 0) {
+			$modal.alert({ content: '请先在 通用-全局设置 配置题库，才能进行在线搜题。' });
+			return;
+		}
+
+		content.replaceChildren(h('span', '搜索中...'));
+		const t = Date.now();
+		const questions =
+			mode === 'manual-batch'
+				? value
+						.split('\n')
+						.map((item) => item.trim())
+						.filter(Boolean)
+				: [value];
+		const results = await searchQuestionsInWrappers(
+			CommonProject.scripts.settings.cfg.answererWrappers,
+			questions,
+			{},
+			mode
+		);
+		const total = results.reduce((count, item) => count + item.infos.flatMap((info) => info.results).length, 0);
+		const resume = ((Date.now() - t) / 1000).toFixed(2);
+
+		content.replaceChildren(
+			h('div', [
+				h(
+					'div',
+					{ style: { color: '#a1a1a1', marginBottom: '12px' } },
+					`共搜索 ${results.length} 题，命中 ${total} 条结果，耗时 ${resume} 秒。详细过程请查看 后台-搜题日志。`
+				),
+				...results.map((item) => createSearchInfosCard(item.question, item.infos))
+			])
+		);
+	};
+
+	return h('div', { className: 'card', style: { marginBottom: '12px', boxSizing: 'border-box' } }, [
+		h('div', { style: { fontWeight: 'bold', marginBottom: '8px' } }, '手动搜题'),
+		h(
+			'div',
+			{ style: { color: '#888', fontSize: '12px', marginBottom: '8px' } },
+			'单题直接搜索，批量搜索请每行输入一题。'
+		),
+		textarea,
+		h('div', { style: { textAlign: 'end', marginTop: '8px' } }, [
+			h('button', '单题搜索', (button) => {
+				button.className = 'base-style-button';
+				button.style.width = '120px';
+				button.style.marginRight = '8px';
+				button.onclick = () => {
+					runSearch('manual-single');
+				};
+			}),
+			h('button', '批量搜索', (button) => {
+				button.className = 'base-style-button';
+				button.style.width = '120px';
+				button.onclick = () => {
+					runSearch('manual-batch');
+				};
+			})
+		]),
+		content
+	]);
+}
 
 export const CommonProject = Project.create({
 	name: '通用',
@@ -165,6 +287,15 @@ export const CommonProject = Project.create({
 										h(
 											'option',
 											{
+												value: 'MeTo',
+												title:
+													'MeTo题库：自动搜题并获取真实答案（两阶段请求），使用 GM_xmlhttpRequest 跨域。\n需要 @connect m.metst.cn 或使用全域名通用版。'
+											},
+											'MeTo题库'
+										),
+										h(
+											'option',
+											{
 												title:
 													'大学生网课题库接口适配器: 将不同的题库整合为一个API接口。详细查看 https://github.com/DokiDoki1103/tikuAdapter'
 											},
@@ -237,7 +368,7 @@ export const CommonProject = Project.create({
 
 													const value = textarea.value;
 
-													if (!value) {
+													if (!value && select.value !== 'MeTo') {
 														$modal.alert({
 															content: h('div', '不能为空！')
 														});
@@ -267,7 +398,21 @@ export const CommonProject = Project.create({
 
 													try {
 														let awsResult: AnswererWrapper[] = [];
-														if (select.value === 'TikuAdapter') {
+														if (select.value === 'MeTo') {
+															select.value = '默认';
+															const metoConfig = getResolvedMetoAuthConfig();
+															if (!metoConfig.tkUid) {
+																$modal.alert({ content: 'MeTo 认证缺少 tk_uid，请先在全局设置中填写。' });
+																return;
+															}
+															if (!metoConfig.poolId) {
+																$modal.alert({
+																	content: 'MeTo 认证缺少 poolId，请填写 poolId，或者填写 user_id + pp 后重新计算。'
+																});
+																return;
+															}
+															awsResult.push(createMetoAnswererWrapper());
+														} else if (select.value === 'TikuAdapter') {
 															if (value.startsWith('http') === false) {
 																$modal.alert({
 																	content: h('div', [
@@ -423,6 +568,63 @@ export const CommonProject = Project.create({
 						};
 					}
 				},
+				metoServer: {
+					label: 'MeTo 服务地址',
+					defaultValue: 'https://m.metst.cn',
+					attrs: {
+						title: '直接请求远程题库，不需要本地代理或本地端口。可切换为 https://m.metost.com。'
+					}
+				},
+				metoTkUid: {
+					label: 'MeTo tk_uid (ti_uid)',
+					defaultValue: '397265',
+					attrs: {
+						title: 'MeTo 题库认证中的 tk_uid / ti_uid。'
+					}
+				},
+				metoPoolId: {
+					label: 'MeTo poolId',
+					defaultValue: '2efc793b-661c-1760-d1ad-e51614113424',
+					attrs: {
+						title: 'MeTo 题库认证中的 poolId。留空时可通过 user_id + pp 自动计算。'
+					}
+				},
+				metoPp: {
+					label: 'MeTo pp (密钥种子)',
+					defaultValue: '9ffb0a9f',
+					attrs: {
+						title: 'MeTo 题库认证中的 pp，用于重新计算 poolId。'
+					}
+				},
+				metoUserId: {
+					label: 'MeTo user_id',
+					defaultValue: '',
+					attrs: {
+						title: '平台用户ID，可选。填写后可配合 pp 重新计算 poolId。'
+					}
+				},
+				metoCalcPoolId: {
+					label: '重算 MeTo poolId',
+					defaultValue: '根据 user_id + pp 重算',
+					attrs: {
+						type: 'button'
+					},
+					onload() {
+						this.onclick = () => {
+							const { metoUserId, metoPp } = CommonProject.scripts.settings.cfg;
+							if (!String(metoUserId || '').trim() || !String(metoPp || '').trim()) {
+								$message.warn({ content: '请先填写 MeTo user_id 和 pp。' });
+								return;
+							}
+
+							CommonProject.scripts.settings.cfg.metoPoolId = calculateMetoPoolId(
+								String(metoUserId).trim(),
+								String(metoPp).trim()
+							);
+							$message.success({ content: 'MeTo poolId 已重新计算。' });
+						};
+					}
+				},
 				upload: {
 					label: '答题完成后',
 					tag: 'select',
@@ -433,9 +635,9 @@ export const CommonProject = Project.create({
 						...([10, 20, 30, 40, 50, 60, 70, 80, 90].map((rate) => [
 							rate,
 							`搜到${rate}%的题目则自动提交`,
-							`例如: 100题中查询到 ${rate} 题的答案,（答案不一定正确）, 则会自动提交。`
+							`例如: 100题中查询到 ${rate} 题的答案,（答案不一定正确）, 则会自动提交；未达到阈值时会自动保存。`
 						]) as [any, string, string][]),
-						['100', '每个题目都查到答案才自动提交', '答案不一定正确'],
+						['100', '每个题目都查到答案才自动提交', '答案不一定正确，未达到阈值时会自动保存'],
 						['force', '强制自动提交', '不管答案是否正确直接强制自动提交，如需开启，请配合随机作答谨慎使用。']
 					],
 					attrs: {
@@ -920,8 +1122,10 @@ export const CommonProject = Project.create({
 					 * @param mount 挂载点
 					 */
 					createWorkResultsPanel: (mount?: HTMLElement) => {
-						const container = mount || h('div');
-						container.style.width = '400px';
+						const root = mount || h('div');
+						root.style.width = '400px';
+						const container = h('div');
+						root.replaceChildren(createManualSearchEntry(), container);
 						/** 记录滚动高度 */
 						let scrollPercent = 0;
 
@@ -1196,7 +1400,7 @@ export const CommonProject = Project.create({
 						this.onConfigChange('resolvedCount', render);
 						$store.addChangeListener(TAB_WORK_RESULTS_KEY, render);
 
-						return container;
+						return root;
 					}
 				};
 			},
@@ -1246,68 +1450,7 @@ export const CommonProject = Project.create({
 				);
 			},
 			onrender({ panel }) {
-				const content = h('div', '', (content) => {
-					content.style.marginBottom = '12px';
-				});
-
-				const search = async (value: string) => {
-					if (CommonProject.scripts.settings.cfg.answererWrappers.length === 0) {
-						$modal.alert({ content: '请先在 通用-全局设置 配置题库，才能进行在线搜题。' });
-						return;
-					}
-
-					content.replaceChildren(h('span', '搜索中...'));
-
-					if (value) {
-						const t = Date.now();
-						const infos = await defaultAnswerWrapperHandler(CommonProject.scripts.settings.cfg.answererWrappers, {
-							title: value
-						});
-						// 耗时计算
-						const resume = ((Date.now() - t) / 1000).toFixed(2);
-
-						content.replaceChildren(
-							h(
-								'div',
-								[
-									h('hr'),
-									h(
-										'div',
-										{ style: { color: '#a1a1a1' } },
-										`搜索到 ${infos.map((i) => i.results).flat().length} 个结果，共耗时 ${resume} 秒`
-									),
-									h(SearchInfosElement, {
-										infos: infos.map((info) => ({
-											results: info.results.map(
-												(res) => [res.question, res.answer, res.extra_data] as [string, string, object]
-											),
-											homepage: info.homepage,
-											name: info.name
-										})),
-										question: value
-									})
-								],
-								(div) => {
-									div.classList.add('card');
-									div.style.width = '480px';
-								}
-							)
-						);
-					} else {
-						content.replaceChildren(h('span', '题目不能为空！'));
-					}
-				};
-
-				const button = h('button', '搜索', (button) => {
-					button.className = 'base-style-button';
-					button.style.width = '120px';
-					button.onclick = () => {
-						search(this.cfg.searchValue);
-					};
-				});
-				const searchContainer = h('div', { style: { textAlign: 'end' } }, [button]);
-
-				panel.body.append(h('div', [content, searchContainer]));
+				panel.body.replaceChildren(createManualSearchEntry());
 			}
 		}),
 		/** 渲染脚本，窗口渲染主要脚本 */

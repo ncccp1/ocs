@@ -1,6 +1,7 @@
 import { $ui, Project, Script, $el, h, $$el, $message, $, $modal, MessageElement, $store, $gm } from 'easy-us';
-import { RemotePage, SimplifyWorkResult, OCSWorker, defaultAnswerWrapperHandler } from '@ocsjs/core';
+import { RemotePage, SimplifyWorkResult, OCSWorker } from '@ocsjs/core';
 import { CommonProject } from './common';
+import { searchAnswerInWrappers } from '../utils/answerer';
 import { workNotes, definition, volume, restudy } from '../utils/configs';
 import {
 	commonWork,
@@ -2340,11 +2341,15 @@ function gxkWorkAndExam(
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: ctx.type || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: ctx.type || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
@@ -2494,11 +2499,15 @@ function xnkWork({ answererWrappers, period, thread, answerSeparators, answerMat
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: ctx.type || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: ctx.type || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
@@ -2607,11 +2616,15 @@ function smartWork(
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: ctx.type || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: ctx.type || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
@@ -2761,11 +2774,15 @@ function fusioncourseWork(
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: ctx.type || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: ctx.type || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
@@ -2883,11 +2900,15 @@ function hikeWork(
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: ctx.type || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: ctx.type || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');

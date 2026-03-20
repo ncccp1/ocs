@@ -1,14 +1,8 @@
-import {
-	$,
-	SimplifyWorkResult,
-	defaultAnswerWrapperHandler,
-	OCSWorker,
-	createDefaultQuestionResolver,
-	splitAnswer
-} from '@ocsjs/core';
+import { $, SimplifyWorkResult, OCSWorker, createDefaultQuestionResolver, splitAnswer } from '@ocsjs/core';
 import { $gm, cors, $message, $$el, $modal, $el, Project, Script, $ui, h } from 'easy-us';
 import { playbackRate, restudy, volume } from '../utils/configs';
 import { CommonWorkOptions, playMedia } from '../utils';
+import { searchAnswerInWrappers } from '../utils/answerer';
 import { CommonProject } from './common';
 import { commonWork, simplifyWorkResult } from '../utils/work';
 import { $console } from './background';
@@ -826,11 +820,15 @@ function work({ answererWrappers, period, thread, answerSeparators, answerMatchM
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: getType(ctx.elements.options) || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: getType(ctx.elements.options) || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
@@ -1001,11 +999,15 @@ function aiWork({ answererWrappers, period, thread, answerSeparators, answerMatc
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: getType(ctx.elements.options) || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: getType(ctx.elements.options) || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');

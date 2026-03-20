@@ -1,3 +1,22 @@
+## [Unreleased] (2026-03-20)
+
+> 对比上一版 `4.12.16`，本次待发布更新主要聚焦 MeTo 题库直连、搜题日志拆分与答题页保存兜底。
+
+### Features
+
+* **script:** 新增 `MeTo` 题库直连接入，支持自定义 `server / tk_uid / poolId / pp / user_id`，并支持通过 `user_id + pp` 重新计算 `poolId`
+* **script:** 新增独立“搜题日志”面板，与系统日志分离，可单独查看请求、响应、重试与报错详情
+* **script:** 在“搜索结果”面板内新增手动搜题入口，支持单题搜索和按行批量搜索
+* **script:** 统一超星、智慧树、中国大学 MOOC、智慧职教、职教云等平台的脚本侧搜题入口，复用新的搜题管线
+
+### Performance Improvements
+
+* **script:** `MeTo` 搜题新增请求重试、主备域名切换、时间校准、精确题干收敛与隐藏答案二阶段补全
+
+### Bug Fixes
+
+* **cx:** 超星章节测试未达到自动提交阈值时，改为自动保存，避免答题完成后既不提交也不保存
+
 ## [4.12.16](https://github.com/ocsjs/ocsjs/compare/4.12.15...4.12.16) (2026-03-06)
 
 
@@ -3099,6 +3118,5 @@
 * **web:** 添加重命名功能，添加目录展开记录保存，添加帮助页面 ([0b90cc2](https://github.com/ocsjs/ocsjs/commit/0b90cc20d33c21b406b7d6426df812aed03eec1c))
 * **web:** 文件编辑，文件拓展 ([9f2f4fb](https://github.com/ocsjs/ocsjs/commit/9f2f4fb6b4fd37b7526239bacf45135ff5874cbc))
 * **web:** 支持文件（夹）拖拽放置，文件（夹）的创建，删除 ([705cc21](https://github.com/ocsjs/ocsjs/commit/705cc210bf382a3a92962f03526366edc0e18398))
-
 
 

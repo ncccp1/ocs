@@ -2,7 +2,6 @@
 
 import {
 	OCSWorker,
-	defaultAnswerWrapperHandler,
 	$,
 	StringUtils,
 	request,
@@ -16,6 +15,7 @@ import {
 import { $modal, h, $store, MessageElement, Project, Script, $el, $gm, $$el, $ui, cors, $message } from 'easy-us';
 
 import { CommonProject } from './common';
+import { searchAnswerInWrappers } from '../utils/answerer';
 import { workNotes, volume, playbackRate, dropdownStyle } from '../utils/configs';
 import {
 	answerWrapperEmptyWarning,
@@ -772,14 +772,18 @@ function workOrExam(
 					const typeInput = elements.type[0] as HTMLInputElement;
 					return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 						await $.sleep((period ?? 3) * 1000);
-						return defaultAnswerWrapperHandler(answererWrappers, {
-							type: (typeInput ? getQuestionType(parseInt(typeInput.value)) : undefined) || 'unknown',
-							title,
-							options:
-								ctx.type === 'completion'
-									? ''
-									: ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText).join('\n')
-						});
+						return searchAnswerInWrappers(
+							answererWrappers,
+							{
+								type: (typeInput ? getQuestionType(parseInt(typeInput.value)) : undefined) || 'unknown',
+								title,
+								options:
+									ctx.type === 'completion'
+										? ''
+										: ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText).join('\n')
+							},
+							'auto'
+						);
 					});
 				} else {
 					throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
@@ -1744,7 +1748,14 @@ const JobRunner = {
 		$console.info('开始章节测试');
 		const visual_state = CommonProject.scripts.render.cfg.visual;
 
-		const frameWindow = frame.contentWindow;
+		const frameWindow = frame.contentWindow as
+			| (Window & {
+					noSubmit?: () => void;
+					btnBlueSubmit?: () => void;
+					submitCheckTimes?: () => void;
+					alert?: (...args: any[]) => void;
+			  })
+			| null;
 		const { TiMu } = domSearchAll({ TiMu: '.TiMu' }, frameWindow!.document);
 
 		// 最大化面板
@@ -1800,14 +1811,18 @@ const JobRunner = {
 
 					return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 						await $.sleep((period ?? 3) * 1000);
-						return defaultAnswerWrapperHandler(answererWrappers, {
-							type: (typeInput ? getQuestionType(parseInt(typeInput.value)) : undefined) || 'unknown',
-							title,
-							options:
-								ctx.type === 'completion'
-									? ''
-									: ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText).join('\n')
-						});
+						return searchAnswerInWrappers(
+							answererWrappers,
+							{
+								type: (typeInput ? getQuestionType(parseInt(typeInput.value)) : undefined) || 'unknown',
+								title,
+								options:
+									ctx.type === 'completion'
+										? ''
+										: ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText).join('\n')
+							},
+							'auto'
+						);
 					});
 				} else {
 					throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
@@ -1975,6 +1990,60 @@ const JobRunner = {
 
 		const results = await worker.doWork();
 
+		const autoSaveChapter = async () => {
+			if (!frameWindow) {
+				$console.warn('未获取到章节测试窗口，无法自动保存。');
+				return;
+			}
+
+			let saved = false;
+			const clickSaveButton = (root: Document | HTMLElement) => {
+				const candidates = Array.from(root.querySelectorAll<HTMLElement>('a,button,input')).filter((element) => {
+					const text =
+						element.textContent?.trim() ||
+						(element instanceof HTMLInputElement ? element.value.trim() : '') ||
+						element.getAttribute('title')?.trim() ||
+						'';
+					const onclick = element.getAttribute('onclick') || '';
+					return /保存|暂存|暂时保存/.test(text) || /noSubmit|save/i.test(onclick);
+				});
+				const button = candidates.find((element) => element.offsetParent !== null) || candidates[0];
+				if (button) {
+					button.click();
+					return true;
+				}
+				return false;
+			};
+
+			try {
+				// @ts-ignore 禁止弹窗
+				frameWindow.alert = () => {};
+				if (typeof frameWindow.noSubmit === 'function') {
+					// @ts-ignore 站点内置暂存
+					frameWindow.noSubmit();
+					saved = true;
+				}
+			} catch (error) {
+				$console.warn('调用超星暂存函数失败，准备尝试点击保存按钮。', String(error));
+			}
+
+			await $.sleep(1500);
+
+			if (clickSaveButton(frameWindow.document)) {
+				saved = true;
+			}
+
+			if (clickSaveButton(document)) {
+				saved = true;
+			}
+
+			if (saved) {
+				$console.info('未达到自动提交条件，已执行自动保存。');
+			} else {
+				$console.warn('未找到可用的自动保存入口，请手动检查。');
+			}
+		};
+
 		const msg = `答题完成，将等待 ${stopSecondWhenFinish} 秒后进行保存或提交。`;
 		$console.info(msg);
 		$message.info({ content: msg, duration: stopSecondWhenFinish });
@@ -1985,27 +2054,24 @@ const JobRunner = {
 			type: upload,
 			results,
 			async callback(finishedRate, uploadable) {
-				const msg = `完成率 ${finishedRate.toFixed(2)}% :  ${uploadable ? '3秒后将自动提交' : '3秒后将自动保存'} `;
+				const msg = `完成率 ${finishedRate.toFixed(2)}% :  ${
+					uploadable ? '3秒后将自动提交' : '3秒后将自动保存（不提交）'
+				} `;
 				$console.info(msg);
 				$message.success({ content: msg, duration: 3 });
 
 				await $.sleep(3000);
 
 				if (uploadable) {
-					// @ts-ignore 提交
-					frameWindow.btnBlueSubmit();
+					frameWindow?.btnBlueSubmit?.();
 
 					await $.sleep(3000);
 					/** 确定按钮 */
-					// @ts-ignore 确定
-					frameWindow.submitCheckTimes();
+					frameWindow?.submitCheckTimes?.();
 					// @ts-ignore 2024/4 更新后上方函数无法关闭弹窗，需要手动关闭确定弹窗
 					top.$('#workpop').hide();
 				} else {
-					// @ts-ignore 禁止弹窗
-					frameWindow.alert = () => {};
-					// @ts-ignore 暂时保存
-					frameWindow.noSubmit();
+					await autoSaveChapter();
 				}
 			}
 		});

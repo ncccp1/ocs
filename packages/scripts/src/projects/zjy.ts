@@ -1,8 +1,9 @@
-import { $, OCSWorker, defaultAnswerWrapperHandler } from '@ocsjs/core';
+import { $, OCSWorker } from '@ocsjs/core';
 import { Project, Script, $ui, $el, $message, $modal, h } from 'easy-us';
 import { volume } from '../utils/configs';
 import { waitForMedia, waitForElement } from '../utils/study';
 import { CommonWorkOptions, playMedia } from '../utils';
+import { searchAnswerInWrappers } from '../utils/answerer';
 import { $console } from './background';
 import { CommonProject } from './common';
 import { commonWork, simplifyWorkResult } from '../utils/work';
@@ -644,11 +645,15 @@ function workOrExam(
 			if (title) {
 				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
 					await $.sleep((period ?? 3) * 1000);
-					return defaultAnswerWrapperHandler(answererWrappers, {
-						type: ctx.type || 'unknown',
-						title,
-						options: ctx.elements.options.map((o) => o.innerText).join('\n')
-					});
+					return searchAnswerInWrappers(
+						answererWrappers,
+						{
+							type: ctx.type || 'unknown',
+							title,
+							options: ctx.elements.options.map((o) => o.innerText).join('\n')
+						},
+						'auto'
+					);
 				});
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');

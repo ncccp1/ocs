@@ -13,18 +13,18 @@ import {
 	MessageElement,
 	$menu
 } from 'easy-us';
-import semver_gt from 'semver/functions/gt';
-import semver_valid from 'semver/functions/valid';
 import { CommonProject } from './common';
 import { CXProject, definedProjects, ICourseProject, IcveMoocProject, ZHSProject, ZJYProject } from '..';
 import { RenderScript } from '../render';
 import { SearchInfosElement } from '../elements/search.infos';
 import { $render } from '../utils/render';
+import { clearPanelLogs, createPanelLogger, LogType, PANEL_LOG_NAMESPACES, PanelLog } from '../utils/logger';
 
 const state = {
 	console: {
 		listenerIds: {
-			logs: 0 as StoreListenerType
+			logs: 0 as StoreListenerType,
+			searchLogs: 0 as StoreListenerType
 		}
 	},
 	app: {
@@ -35,8 +35,6 @@ const state = {
 		}
 	}
 };
-
-export type LogType = 'log' | 'info' | 'debug' | 'warn' | 'error';
 
 type RequestList = {
 	id: string;
@@ -49,6 +47,115 @@ type RequestList = {
 	error?: string;
 	time: number;
 }[];
+
+const getTypeDesc = (type: LogType) =>
+	type === 'info' ? '信息' : type === 'error' ? '错误' : type === 'warn' ? '警告' : type === 'debug' ? '调试' : '日志';
+
+const getCategoryDesc = (category?: PanelLog['category']) => (category === 'search' ? '搜题' : '系统');
+
+function renderLogPanel(
+	script: Script,
+	panel: { body: HTMLElement },
+	listenerRef: 'logs' | 'searchLogs',
+	namespace: string,
+	title: string
+) {
+	const createLog = (log: PanelLog) => {
+		const date = new Date(log.time);
+		const item = h(
+			'div',
+			{
+				title: '双击复制日志信息',
+				className: 'item'
+			},
+			[
+				h(
+					'span',
+					{ className: 'time' },
+					`${date.getHours().toFixed(0).padStart(2, '0')}:${date.getMinutes().toFixed(0).padStart(2, '0')} `
+				),
+				h('span', { className: 'warn' }, `[${getCategoryDesc(log.category)}]`),
+				h('span', { className: log.type }, `[${getTypeDesc(log.type)}]`),
+				h('span', ':' + log.content),
+				...(log.detail
+					? [
+							h('details', { style: { marginTop: '4px' } }, [
+								h('summary', { style: { cursor: 'pointer' } }, '查看详情'),
+								h('pre', log.detail)
+							])
+					  ]
+					: [])
+			]
+		);
+
+		item.addEventListener('dblclick', () => {
+			navigator.clipboard.writeText(
+				Object.keys(log)
+					.map((key) => `${key}: ${(log as any)[key]}`)
+					.join('\n')
+			);
+		});
+
+		return item;
+	};
+
+	const isScrollBottom = (div: HTMLElement) => {
+		const { scrollHeight, scrollTop, clientHeight } = div;
+		return scrollTop + clientHeight + 50 > scrollHeight;
+	};
+
+	const list = h('div', { className: 'card console' });
+	const toolbar = h('div', { style: { marginBottom: '8px', textAlign: 'right' } }, [
+		h('button', '清空日志', (button) => {
+			button.className = 'base-style-button';
+			button.onclick = () => {
+				clearPanelLogs(namespace);
+			};
+		})
+	]);
+
+	const showLogs = (logs: PanelLog[]) => {
+		if (logs.length) {
+			list.replaceChildren(...logs.map((log) => createLog(log)));
+		} else {
+			list.replaceChildren(
+				h('div', `暂无${title}`, (div) => {
+					div.style.textAlign = 'center';
+				})
+			);
+		}
+	};
+
+	const logs = (script.cfg.logs || []) as PanelLog[];
+	showLogs(logs);
+
+	script.offConfigChange(state.console.listenerIds[listenerRef]);
+	state.console.listenerIds[listenerRef] = script.onConfigChange('logs', (currentLogs: PanelLog[]) => {
+		const latest = currentLogs[currentLogs.length - 1];
+		if (!latest) {
+			showLogs(currentLogs || []);
+			return;
+		}
+
+		if (!list.children.length || list.textContent?.includes(`暂无${title}`)) {
+			showLogs(currentLogs);
+			return;
+		}
+
+		const item = createLog(latest);
+		list.append(item);
+		setTimeout(() => {
+			if (isScrollBottom(list)) {
+				item.scrollIntoView();
+			}
+		}, 10);
+	});
+
+	panel.body.replaceChildren(toolbar, list);
+	setTimeout(() => {
+		list.lastElementChild?.scrollIntoView();
+	}, 10);
+}
 
 /** 后台进程，处理与PC软件端的通讯，以及其他后台操作 */
 export const BackgroundProject = Project.create({
@@ -70,97 +177,24 @@ export const BackgroundProject = Project.create({
 			namespace: 'render.console',
 			configs: {
 				logs: {
-					defaultValue: [] as { type: LogType; content: string; time: number; stack: string }[]
+					defaultValue: [] as PanelLog[]
 				}
 			},
 			onrender({ panel }) {
-				const getTypeDesc = (type: LogType) =>
-					type === 'info'
-						? '信息'
-						: type === 'error'
-						? '错误'
-						: type === 'warn'
-						? '警告'
-						: type === 'debug'
-						? '调试'
-						: '日志';
-
-				const createLog = (log: { type: LogType; content: string; time: number; stack: string }) => {
-					const date = new Date(log.time);
-					const item = h(
-						'div',
-						{
-							title: '双击复制日志信息',
-							className: 'item'
-						},
-						[
-							h(
-								'span',
-								{ className: 'time' },
-								`${date.getHours().toFixed(0).padStart(2, '0')}:${date.getMinutes().toFixed(0).padStart(2, '0')} `
-							),
-							h('span', { className: log.type }, `[${getTypeDesc(log.type)}]`),
-							h('span', ':' + log.content)
-						]
-					);
-
-					item.addEventListener('dblclick', () => {
-						navigator.clipboard.writeText(
-							Object.keys(log)
-								.map((k) => `${k}: ${(log as any)[k]}`)
-								.join('\n')
-						);
-					});
-
-					return item;
-				};
-
-				const showLogs = () => {
-					const div = h('div', { className: 'card console' });
-
-					const logs = this.cfg.logs.map((log) => createLog(log));
-					if (logs.length) {
-						div.replaceChildren(...logs);
-					} else {
-						div.replaceChildren(
-							h('div', '暂无任何日志', (div) => {
-								div.style.textAlign = 'center';
-							})
-						);
-					}
-
-					return { div, logs };
-				};
-
-				/**
-				 * 判断滚动条是否滚到底部
-				 */
-				const isScrollBottom = (div: HTMLElement) => {
-					const { scrollHeight, scrollTop, clientHeight } = div;
-					return scrollTop + clientHeight + 50 > scrollHeight;
-				};
-
-				const { div, logs } = showLogs();
-
-				this.offConfigChange(state.console.listenerIds.logs);
-				state.console.listenerIds.logs = this.onConfigChange('logs', (logs) => {
-					const log = createLog(logs[logs.length - 1]);
-					div.append(log);
-					setTimeout(() => {
-						if (isScrollBottom(div)) {
-							log.scrollIntoView();
-						}
-					}, 10);
-				});
-
-				const show = () => {
-					panel.body.replaceChildren(div);
-					setTimeout(() => {
-						logs[logs.length - 1]?.scrollIntoView();
-					}, 10);
-				};
-
-				show();
+				renderLogPanel(this, panel, 'logs', PANEL_LOG_NAMESPACES.system, '系统日志');
+			}
+		}),
+		searchConsole: new Script({
+			name: '🔍 搜题日志',
+			matches: [['所有', /.*/]],
+			namespace: 'render.search-console',
+			configs: {
+				logs: {
+					defaultValue: [] as PanelLog[]
+				}
+			},
+			onrender({ panel }) {
+				renderLogPanel(this, panel, 'searchLogs', PANEL_LOG_NAMESPACES.search, '搜题日志');
 			}
 		}),
 		appConfigSync: new Script({
@@ -911,6 +945,7 @@ export const BackgroundProject = Project.create({
 				await $menu('⚙️', { scriptPanelLink: CommonProject.scripts.settings });
 				await $menu('📥', { scriptPanelLink: BackgroundProject.scripts.update });
 				await $menu('📄', { scriptPanelLink: BackgroundProject.scripts.console });
+				await $menu('🧾', { scriptPanelLink: BackgroundProject.scripts.searchConsole });
 			}
 		})
 	}
@@ -919,33 +954,4 @@ export const BackgroundProject = Project.create({
 type Console = Record<LogType, (...msg: any[]) => void>;
 
 /** 日志对象，存储日志并显示在日志面板 */
-export const $console: Console = new Proxy({} as Console, {
-	get(target, key) {
-		return (...msg: any[]) => {
-			let logs = BackgroundProject.scripts.console.cfg.logs;
-			if (logs.length > 50) {
-				logs = logs.slice(-50);
-			}
-
-			const stack_str = Error().stack || '';
-
-			// 简化堆栈信息
-			const stacks = stack_str
-				.replace('Error', '')
-				.match(/at (.*) \(.+:\/\/.+:(.+):(.+)\)/g)
-				?.map((s) => {
-					const match = s.match(/at (.*) \(.+:\/\/.+:(.+):(.+)\)/) || [];
-					return [match[1], match[2], match[3]];
-				});
-
-			logs = logs.concat({
-				type: key.toString() as LogType,
-				content: msg.join(' '),
-				time: Date.now(),
-				stack: JSON.stringify([stack_str.split('\n')[0], ...(stacks || [])])
-			});
-
-			BackgroundProject.scripts.console.cfg.logs = logs;
-		};
-	}
-});
+export const $console: Console = createPanelLogger(PANEL_LOG_NAMESPACES.system, 'system');
