@@ -78,6 +78,42 @@ export class SearchInfosElement extends HTMLElement {
 								});
 							}
 
+							if (extra_data.option) {
+								extra_data.tags = extra_data.tags || [];
+								extra_data.tags.push({
+									text: '选项 ' + extra_data.option,
+									title: extra_data.answerText ? '所选选项内容：' + extra_data.answerText : 'AI 选择的选项字母',
+									color: 'blue'
+								});
+							}
+
+							if (extra_data.webSearch) {
+								extra_data.tags = extra_data.tags || [];
+								extra_data.tags.push({
+									text: '联网',
+									title: 'AI 不确定，已联网搜索后作答：' + (extra_data.searchQuery || ''),
+									color: 'green'
+								});
+							}
+
+							if (extra_data.insufficient) {
+								extra_data.tags = extra_data.tags || [];
+								extra_data.tags.push({
+									text: '信息不足',
+									title: '此题与视频内容强相关，AI 无法确定，答案仅为猜测。',
+									color: 'gray'
+								});
+							}
+
+							if (extra_data.source === 'standard') {
+								extra_data.tags = extra_data.tags || [];
+								extra_data.tags.push({
+									text: '标准答案',
+									title: '此答案来自提交后页面显示的标准答案，可信度最高。',
+									color: 'green'
+								});
+							}
+
 							if (extra_data.cache) {
 								extra_data.tags = extra_data.tags || [];
 								extra_data.tags.push({

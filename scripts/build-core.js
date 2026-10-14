@@ -32,6 +32,37 @@ async function buildPackages() {
 	await execOut('vite build', { cwd: '../packages/scripts' });
 }
 
+/** 发布文件所在目录，脚本管理器的自动更新、脚本内的更新提示都读取这里 */
+const RELEASE_BASE_URL = 'https://raw.githubusercontent.com/ncccp1/ocs/main/release/';
+const releasePath = path.resolve(__dirname, '../release');
+
+/**
+ * 设置脚本管理器自动更新地址
+ * updateURL 指向只含元数据的 .meta.js（体积小，用于检查版本），downloadURL 指向完整脚本
+ * @param {import('../packages/utils').CreateOptions} opts
+ * @param {string} name
+ */
+function setUpdateUrls(opts, name) {
+	opts.metadata.updateURL = RELEASE_BASE_URL + name + '.meta.js';
+	opts.metadata.downloadURL = RELEASE_BASE_URL + name + '.user.js';
+}
+
+/** 把构建出的脚本复制到 release 目录，并生成对应的 .meta.js（仅元数据头） */
+async function publishRelease() {
+	fs.mkdirSync(releasePath, { recursive: true });
+	for (const name of ['nanchengpai', 'nanchengpai.common']) {
+		const src = path.join(distResolvedPath, name + '.user.js');
+		const code = fs.readFileSync(src, 'utf-8');
+		const match = code.match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/);
+		if (!match) {
+			throw new Error('未找到脚本元数据头：' + src);
+		}
+		fs.copyFileSync(src, path.join(releasePath, name + '.user.js'));
+		fs.writeFileSync(path.join(releasePath, name + '.meta.js'), `${match[0]}\n`, 'utf-8');
+		console.log('release: ', path.join(releasePath, name + '.user.js'));
+	}
+}
+
 async function createUserJs() {
 	/** 模拟浏览器环境 */
 	require('browser-env')();
@@ -73,13 +104,33 @@ async function createUserJs() {
 			metadata: {
 				name: '南城派网课助手',
 				version: version,
-				description: ['南城派网课助手，基于 OCSJS 二次开发，支持 ', projectList, '等网课的学习、作业、考试。'].join(' '),
+				description: ['南城派网课助手，基于 OCSJS 二次开发，支持 ', projectList, '等网课的学习、作业、考试。'].join(
+					' '
+				),
 				author: 'ncccp1',
 				license: 'MIT',
 				namespace: 'https://github.com/ncccp1/ocs',
 				homepage: 'https://github.com/ncccp1/ocs',
 				source: 'https://github.com/ncccp1/ocs',
-				connect: ['raw.githubusercontent.com', 'github.com', 'm.metst.cn', 'm.metost.com', 'v.metst.cn', 'localhost', '127.0.0.1'],
+				connect: [
+					'raw.githubusercontent.com',
+					'github.com',
+					'm.metst.cn',
+					'm.metost.com',
+					'v.metst.cn',
+					'api.deepseek.com',
+					'cn.bing.com',
+					'bing.com',
+					'duckduckgo.com',
+					'cdn.ocsjs.com',
+					'chaoxing.com',
+					'zhihuishu.com',
+					'icourse163.org',
+					'127.net',
+					'icve.com.cn',
+					'localhost',
+					'127.0.0.1'
+				],
 				match: matchMetadata,
 				grant: [
 					'GM_info',
@@ -107,6 +158,7 @@ async function createUserJs() {
 	};
 
 	const officialOpts = createOptions();
+	setUpdateUrls(officialOpts, 'nanchengpai');
 	console.log('CreateUserScript: ', officialOpts.metadata.name, officialOpts.dist);
 	await createUserScript(officialOpts);
 
@@ -135,6 +187,7 @@ async function createUserJs() {
 	const connect = Array.isArray(commonOpts.metadata.connect) ? commonOpts.metadata.connect : [];
 	connect.push('*');
 	commonOpts.metadata.connect = connect;
+	setUpdateUrls(commonOpts, 'nanchengpai.common');
 	commonOpts.entry = path.join(__dirname, '../packages/scripts/entry.common.js');
 	commonOpts.dist = path.join(distResolvedPath, 'nanchengpai.common.user.js');
 
@@ -142,4 +195,4 @@ async function createUserJs() {
 	await createUserScript(commonOpts);
 }
 
-exports.default = series(cleanOutput, buildPackages, createUserJs);
+exports.default = series(cleanOutput, buildPackages, createUserJs, publishRelease);

@@ -381,8 +381,15 @@ export function createWorkerControl(options: {
 export function optimizationElementWithImage(root: HTMLElement, clone_node: boolean = false): HTMLElement {
 	const clone = clone_node ? (root.cloneNode(true) as HTMLElement) : root;
 	for (const img of Array.from(clone.querySelectorAll('img'))) {
+		// 已经追加过链接的图片不再重复追加（同一个元素会被多次处理，克隆时也会带上之前追加的节点）
+		const next = img.nextElementSibling as HTMLElement | null;
+		if (next?.dataset?.ncpImgUrl) {
+			continue;
+		}
+
 		const src = document.createElement('span');
 		src.innerText = img.src;
+		src.dataset.ncpImgUrl = '1';
 		// 隐藏图片，但不影响 innerText 的获取
 		src.style.fontSize = '0px';
 		img.after(src);

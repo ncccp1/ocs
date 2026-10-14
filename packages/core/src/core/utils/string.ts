@@ -73,5 +73,8 @@ export function answerExactMatch(answers: string[], options: string[]): string[]
  * 删除题目选项中开头的冗余字符串
  */
 export function removeRedundant(str: string) {
-	return str?.trim().replace(/[A-Z]{1}[^A-Za-z0-9\u2E80-\u9FFF]+([A-Za-z0-9\u2E80-\u9FFF]+)/, '$1') || '';
+	// 只删除开头的选项标签（A. / A、 / A： / A) / “A”后面换行或空白再跟内容）。
+	// 旧实现没有锚定开头，会把内容中间的“大写字母 + 符号 + 字母”也删掉，
+	// 例如答案 “DW +DQ -DA” 被改成 “DDQ -DA”，而选项只去掉了标签，两边永远对不上。
+	return str?.trim().replace(/^[A-Z](?:\s*[.、:：．)）]\s*|\s+)(?=[A-Za-z0-9\u2E80-\u9FFF])/, '') || '';
 }

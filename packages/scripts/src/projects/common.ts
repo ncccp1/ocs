@@ -16,9 +16,24 @@ import { SearchInfosElement } from '../elements/search.infos';
 import { RenderScript } from '../render';
 import { dropdownStyle } from '../utils/configs';
 import {
+	cleanBlankAnswer,
+	cleanQuestionStem,
+	inferChoiceType,
+	isBlankAnswerJunk,
+	isAnswerUsableForOptions,
+	matchAnswerToOptions,
+	normalizeText,
+	parseQuestionWithOptions,
+	textSimilarity
+} from '../utils/option-match';
+import { getSelectionTextWithImages } from '../utils/selection';
+import {
 	calculateMetoPoolId,
 	createMetoAnswererWrapper,
+	extractImageUrls,
 	getResolvedMetoAuthConfig,
+	isAiAnswererAvailable,
+	isCredibleAnswer,
 	searchQuestionsInWrappers
 } from '../utils/answerer';
 
@@ -29,6 +44,8 @@ const PROJECT_ISSUES = 'https://github.com/ncccp1/ocs/issues';
 const PROJECT_CHANGELOG = 'https://raw.githubusercontent.com/ncccp1/ocs/main/CHANGELOG.md';
 const PROJECT_SETTING_EXTENSION = '.ncpsetting';
 const PROJECT_SETTING_IMPORT_ACCEPT = '.ncpsetting,.ocssetting';
+const QUESTION_CACHE_EXPORT_EXTENSION = '.ncp-question-cache.json';
+const CX_CHAPTER_RETAKE_CACHE_TAB_KEY = 'cx_chapter_auto_retake_caches';
 
 const state = {
 	workResult: {
@@ -87,12 +104,181 @@ const state = {
 /**
  * 题库缓存类型
  */
-type QuestionCache = { title: string; answer: string; from: string; homepage: string; ai?: boolean };
+type QuestionCacheSource = 'standard' | 'bank' | 'ai';
+
+/**
+ * - standard: 提交后从页面读取的标准答案（可信度最高，会覆盖同一题的其他答案）
+ * - bank: 在线题库返回的答案
+ * - ai: AI 生成的答案（与在线题库同级，互不覆盖；只会被标准答案覆盖）
+ */
+type QuestionCache = {
+	title: string;
+	answer: string;
+	from: string;
+	homepage: string;
+	ai?: boolean;
+	/** 课程范围，用于区分不同课程中题干相同但答案不同的题目；为空表示未知（旧缓存或无法识别课程） */
+	scope?: string;
+	source?: QuestionCacheSource;
+	time?: number;
+	/** 所选选项的字母（如 B、AC），用于展示；匹配时以 answer 为准 */
+	option?: string;
+	/** 所选选项的内容描述（选项是图片时，answer 只有字母，这里保存 AI 对图片内容的描述） */
+	content?: string;
+};
+
+const QUESTION_CACHE_SOURCE_RANK: Record<QuestionCacheSource, number> = { standard: 3, bank: 2, ai: 2 };
+
+/**
+ * 题库缓存的题干比较键：忽略空白、标点、全/半角括号、序号和题型标记。
+ * 答题页和答案详情页的同一道题，空格、括号写法、序号/题型前缀可能不同，不能用字符串完全相等来比较。
+ */
+export function normalizeCacheTitle(title: string) {
+	return normalizeText(
+		String(title || '')
+			.replace(/^\s*\d+\s*[.、．)）]\s*/, '')
+			.replace(
+				/[【[(（]\s*(?:单选题|多选题|判断题|填空题|简答题|选择题|问答题|名词解释|论述题|计算题)\s*[】\])）]/g,
+				''
+			)
+	);
+}
+
+export function getQuestionCacheSource(cache: Pick<QuestionCache, 'source' | 'from' | 'ai'>): QuestionCacheSource {
+	if (cache.source) {
+		return cache.source;
+	}
+	if (/回填/.test(cache.from || '')) {
+		return 'standard';
+	}
+	return cache.ai ? 'ai' : 'bank';
+}
+
+/**
+ * 获取当前页面所属的课程范围，例如 `chaoxing.com:123456`。
+ * 页面链接中没有课程 id 时返回空字符串（此时无法区分课程，缓存对所有课程通用）。
+ */
+export function getQuestionCacheScope(): string {
+	const read = (win: Window | null | undefined) => {
+		try {
+			if (!win) {
+				return '';
+			}
+			const params = new URL(win.location.href).searchParams;
+			const id = params.get('courseId') || params.get('courseid') || params.get('courseID') || '';
+			return id ? `${win.location.hostname.split('.').slice(-2).join('.')}:${id}` : '';
+		} catch {
+			return '';
+		}
+	};
+
+	return read(window) || read(window.top);
+}
+
+function normalizeQuestionCacheItems(input: any): QuestionCache[] {
+	const rawItems = Array.isArray(input)
+		? input
+		: Array.isArray(input?.caches)
+		? input.caches
+		: Array.isArray(input?.localQuestionCaches)
+		? input.localQuestionCaches
+		: [];
+
+	const items: QuestionCache[] = [];
+	for (const raw of rawItems) {
+		const title = String(raw?.title || raw?.question || '').trim();
+		const answer = String(raw?.answer || '').trim();
+		if (!title || !answer) {
+			continue;
+		}
+
+		items.push({
+			title,
+			answer,
+			from: String(raw?.from || '导入题库缓存'),
+			homepage: String(raw?.homepage || ''),
+			ai: Boolean(raw?.ai),
+			// 旧缓存/导入的缓存没有课程信息时保持为空（对所有课程通用），避免被误归到当前课程
+			scope: raw?.scope ? String(raw.scope) : '',
+			source: ['standard', 'bank', 'ai'].includes(raw?.source) ? raw.source : undefined,
+			time: typeof raw?.time === 'number' ? raw.time : undefined,
+			option: raw?.option ? String(raw.option) : undefined,
+			content: raw?.content ? String(raw.content) : undefined
+		});
+	}
+
+	return items;
+}
+
+/** 推荐选择：从搜题结果中挑出与题干最相似的结果，并把答案配对到题目自带的选项上 */
+function createRecommendation(question: string, infos: SearchInformation[]) {
+	const parsed = parseQuestionWithOptions(question);
+	const options = parsed.options;
+	const target = cleanQuestionStem(parsed.stem) || question;
+
+	const candidates = infos
+		.flatMap((info) =>
+			info.results
+				.filter((result) => String(result.answer || '').trim())
+				.map((result) => ({
+					info,
+					result,
+					similarity: textSimilarity(target, result.question || ''),
+					isAi: Boolean((result.extra_data as { ai?: boolean } | undefined)?.ai)
+				}))
+		)
+		.sort((a, b) => b.similarity - a.similarity);
+
+	const best = candidates[0];
+	if (!best) {
+		return undefined;
+	}
+
+	const answers = candidates.filter((c) => c.similarity >= best.similarity - 0.001).map((c) => c.result.answer);
+	const similarityText = best.isAi ? 'AI 作答' : `题目相似度 ${(best.similarity * 100).toFixed(0)}%`;
+	const lowConfidence = !best.isAi && best.similarity < 0.6;
+
+	let text = '';
+	if (options.length) {
+		const type = inferChoiceType(question, options, answers);
+		const indexes = matchAnswerToOptions(answers, options, type);
+		text = indexes.length
+			? '推荐选择：' + indexes.map((index) => `${String.fromCharCode(65 + index)} ${options[index]}`).join('；')
+			: `未能把答案匹配到选项，题库答案：${best.result.answer}`;
+	} else {
+		text = `推荐答案：${best.result.answer}`;
+	}
+
+	return h(
+		'div',
+		{
+			style: {
+				margin: '8px 0',
+				padding: '8px',
+				borderRadius: '4px',
+				background: lowConfidence ? '#fff7e6' : '#e8f5e9',
+				border: `1px solid ${lowConfidence ? '#ffd591' : '#a5d6a7'}`,
+				fontWeight: 'bold',
+				wordBreak: 'break-all'
+			}
+		},
+		[
+			h('div', text),
+			h(
+				'div',
+				{ style: { fontWeight: 'normal', fontSize: '12px', color: '#888', marginTop: '4px' } },
+				`来源：${best.info.name}，${similarityText}${lowConfidence ? '（相似度较低，仅供参考）' : ''}`
+			)
+		]
+	);
+}
 
 function createSearchInfosCard(question: string, infos: SearchInformation[]) {
+	const recommendation = createRecommendation(question, infos);
 	return h(
 		'div',
 		[
+			...(recommendation ? [recommendation] : []),
 			h(SearchInfosElement, {
 				infos: infos.map((info) => ({
 					results: info.results.map((res) => [res.question, res.answer, res.extra_data] as [string, string, object]),
@@ -131,8 +317,48 @@ function createManualSearchEntry() {
 		div.style.marginTop = '12px';
 	});
 
+	/** 题目中的图片预览：识别到图片时，AI 搜题会一并发送图片 */
+	const previewEl = h('div', { style: { marginTop: '8px', display: 'none' } });
+	const renderPreview = () => {
+		const urls = extractImageUrls(textarea.value);
+		previewEl.replaceChildren();
+		previewEl.style.display = urls.length ? 'block' : 'none';
+		if (urls.length === 0) {
+			return;
+		}
+
+		previewEl.append(
+			h(
+				'div',
+				{ style: { color: '#888', fontSize: '12px', marginBottom: '4px' } },
+				`识别到 ${urls.length} 张图片，开启 AI 兜底答题后会一并发送给 AI 识别。`
+			),
+			...urls.map((url) =>
+				h('img', { src: url, title: url }, (img) => {
+					img.style.maxHeight = '72px';
+					img.style.maxWidth = '120px';
+					img.style.marginRight = '6px';
+					img.style.border = '1px solid #ddd';
+					img.style.borderRadius = '4px';
+					img.onerror = () => img.remove();
+				})
+			)
+		);
+	};
+	renderPreview();
+
 	textarea.addEventListener('input', () => {
 		CommonProject.scripts.onlineSearch.cfg.searchValue = textarea.value;
+		renderPreview();
+	});
+
+	// 划词自动填入（或在其他页面/标签中修改）后，同步更新搜索框
+	CommonProject.scripts.onlineSearch.onConfigChange('searchValue', () => {
+		const latest = String(CommonProject.scripts.onlineSearch.cfg.searchValue || '');
+		if (latest !== textarea.value) {
+			textarea.value = latest;
+			renderPreview();
+		}
 	});
 
 	const runSearch = async (mode: 'manual-single' | 'manual-batch') => {
@@ -142,8 +368,10 @@ function createManualSearchEntry() {
 			return;
 		}
 
-		if (CommonProject.scripts.settings.cfg.answererWrappers.length === 0) {
-			$modal.alert({ content: '请先在 通用-全局设置 配置题库，才能进行在线搜题。' });
+		if (CommonProject.scripts.settings.cfg.answererWrappers.length === 0 && !isAiAnswererAvailable()) {
+			$modal.alert({
+				content: '请先在 通用-全局设置 配置题库（或开启 AI 兜底答题并填写 API Key），才能进行在线搜题。'
+			});
 			return;
 		}
 
@@ -156,10 +384,26 @@ function createManualSearchEntry() {
 						.map((item) => item.trim())
 						.filter(Boolean)
 				: [value];
+		// 单题搜索时，如果输入里带有选项，则把题干和选项拆开：题库用题干搜，AI 能拿到结构化的选项和题型
+		let queryQuestions = questions;
+		let baseEnv: Record<string, any> = {};
+		let hasOptions = false;
+		if (mode === 'manual-single') {
+			const parsed = parseQuestionWithOptions(value);
+			const stem = cleanQuestionStem(parsed.stem);
+			if (parsed.options.length >= 2 && stem) {
+				hasOptions = true;
+				queryQuestions = [stem];
+				baseEnv = {
+					type: inferChoiceType(value, parsed.options),
+					options: parsed.options.map((option, index) => `${String.fromCharCode(65 + index)}. ${option}`).join('\n')
+				};
+			}
+		}
 		const results = await searchQuestionsInWrappers(
 			CommonProject.scripts.settings.cfg.answererWrappers,
-			questions,
-			{},
+			queryQuestions,
+			baseEnv,
 			mode
 		);
 		const total = results.reduce((count, item) => count + item.infos.flatMap((info) => info.results).length, 0);
@@ -172,7 +416,7 @@ function createManualSearchEntry() {
 					{ style: { color: '#a1a1a1', marginBottom: '12px' } },
 					`共搜索 ${results.length} 题，命中 ${total} 条结果，耗时 ${resume} 秒。详细过程请查看 后台-搜题日志。`
 				),
-				...results.map((item) => createSearchInfosCard(item.question, item.infos))
+				...results.map((item) => createSearchInfosCard(hasOptions ? value : item.question, item.infos))
 			])
 		);
 	};
@@ -182,10 +426,22 @@ function createManualSearchEntry() {
 		h(
 			'div',
 			{ style: { color: '#888', fontSize: '12px', marginBottom: '8px' } },
-			'单题直接搜索，批量搜索请每行输入一题。'
+			'单题直接搜索，批量搜索请每行输入一题。开启“划词搜索”后，选中页面中的题目（含图片）会自动填入；搜索框不为空时不会被覆盖，清空后才会重新填入。'
 		),
 		textarea,
+		previewEl,
 		h('div', { style: { textAlign: 'end', marginTop: '8px' } }, [
+			h('button', '清空', (button) => {
+				button.className = 'base-style-button-secondary';
+				button.style.width = '80px';
+				button.style.marginRight = '8px';
+				button.onclick = () => {
+					textarea.value = '';
+					CommonProject.scripts.onlineSearch.cfg.searchValue = '';
+					renderPreview();
+					content.replaceChildren();
+				};
+			}),
 			h('button', '单题搜索', (button) => {
 				button.className = 'base-style-button';
 				button.style.width = '120px';
@@ -315,12 +571,7 @@ export const CommonProject = Project.create({
 								width: 600,
 								maskCloseable: false,
 								content: $ui.notes([
-									[
-										h('div', [
-											'题库配置填写教程：',
-											h('a', { href: PROJECT_REPO, target: '_blank' }, PROJECT_REPO)
-										])
-									],
+									[h('div', ['题库配置填写教程：', h('a', { href: PROJECT_REPO, target: '_blank' }, PROJECT_REPO)])],
 									[
 										h('div', [
 											'⚠️ 如果无法粘贴，请点->：',
@@ -631,6 +882,82 @@ export const CommonProject = Project.create({
 						};
 					}
 				},
+				aiEnable: {
+					label: 'AI 兜底答题',
+					defaultValue: false,
+					attrs: {
+						type: 'checkbox',
+						title:
+							'题库全部搜不到答案时，调用 AI（OpenAI 兼容接口，默认 DeepSeek）作答。AI 答案会写入题库缓存（与在线题库同级），取得标准答案后会被自动覆盖。'
+					}
+				},
+				aiBaseUrl: {
+					label: 'AI 接口地址',
+					defaultValue: 'https://api.deepseek.com',
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						title: 'OpenAI 兼容接口的 base URL，会自动拼接 /chat/completions。'
+					}
+				},
+				aiApiKey: {
+					label: 'AI API Key',
+					defaultValue: '',
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						type: 'password',
+						title:
+							'DeepSeek 开放平台创建的 API Key，仅保存在本机浏览器中。注意：“导出全部设置”的文件会包含此 Key，请勿分享设置文件。'
+					}
+				},
+				aiModel: {
+					label: 'AI 模型',
+					defaultValue: 'deepseek-flash',
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						title: 'DeepSeek Flash 模型名为 deepseek-flash（旧名 deepseek-v4-flash 已停用，仍被兼容）。'
+					}
+				},
+				aiUseImages: {
+					label: 'AI 识别图片',
+					defaultValue: true,
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						type: 'checkbox',
+						title:
+							'题目或选项中包含图片时，把图片一并发送给 AI（模型需支持图片输入，DeepSeek 的 deepseek-flash 支持）。接口返回不支持图片时会自动退回仅文字。'
+					}
+				},
+				aiThinking: {
+					label: 'AI 深度思考',
+					defaultValue: true,
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						type: 'checkbox',
+						title:
+							'开启后 AI 会先推理再回答，复杂题（计算、电路等）更准，但明显更慢也更耗费额度；如果响应太慢可以关闭。返回空内容时会自动关闭思考重试。'
+					}
+				},
+				aiWebSearch: {
+					label: 'AI 不确定时联网搜索',
+					defaultValue: true,
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						type: 'checkbox',
+						title:
+							'AI 没有把握（信心不足或给不出答案）时，自动联网搜索后再作答。优先使用 DeepSeek 原生联网搜索（服务端多轮搜索，较慢且更耗额度），不可用时回退为抓取 Bing / DuckDuckGo 网页结果。'
+					}
+				},
+				aiExtraBody: {
+					label: 'AI 额外请求参数',
+					defaultValue: '',
+					tag: 'textarea',
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						title:
+							'可选，JSON 对象，会合并到请求体中，例如 {"thinking":{"type":"disabled"}}。DeepSeek 官方接口暂无联网搜索参数，如使用支持联网的中转/网关，可在此填写其参数。',
+						style: { minWidth: '200px', minHeight: '50px' }
+					}
+				},
 				upload: {
 					label: '答题完成后',
 					tag: 'select',
@@ -648,7 +975,7 @@ export const CommonProject = Project.create({
 					],
 					attrs: {
 						title:
-							'自动答题完成后的设置，目前仅在 超星学习通的章节测试 中生效, 鼠标悬浮在选项上可以查看每个选项的具体解释。'
+							'自动答题完成后的保存/提交设置。超星章节测试、作业/考试均会按此完成率判断是否自动提交；未达到阈值时会优先自动保存。'
 					}
 				},
 				thread: {
@@ -694,6 +1021,15 @@ export const CommonProject = Project.create({
 								el.value = el.defaultValue;
 							}
 						});
+					}
+				},
+				'chapterTest-autoRetake': {
+					defaultValue: false,
+					label: '(仅超星)错题回填重答',
+					attrs: {
+						type: 'checkbox',
+						title:
+							'超星章节测试/作业页未全部完成时，自动随机补答未完成题目并强制提交；提交后尝试查看正确答案、写入本地题库缓存，再点击重做并用缓存答案重新答题。'
 					}
 				},
 				advancedSettings: {
@@ -836,6 +1172,16 @@ export const CommonProject = Project.create({
 					label: '题库缓存功能',
 					defaultValue: true,
 					attrs: { type: 'checkbox', title: '详情请前往 通用-其他应用-题库拓展查看。' }
+				},
+				cacheCrossCourse: {
+					label: '跨课程使用缓存',
+					defaultValue: false,
+					showIf: 'common.settings.enableQuestionCaches',
+					attrs: {
+						type: 'checkbox',
+						title:
+							'默认只使用当前课程（以及未记录课程的旧缓存）中的答案，避免不同课程中题干相同但答案不同的题目互相干扰。开启后会使用所有课程的缓存。'
+					}
 				},
 				autoStart: {
 					separator: '运行控制',
@@ -1465,7 +1811,11 @@ export const CommonProject = Project.create({
 				selectSearch: {
 					label: '划词搜索',
 					defaultValue: true,
-					attrs: { type: 'checkbox', title: '使用鼠标滑动选择页面中的题目进行搜索。' }
+					attrs: {
+						type: 'checkbox',
+						title:
+							'使用鼠标滑动选择页面中的题目（包含图片）自动填入搜索框。仅当搜索框为空，或内容是上一次自动填入且未被修改时才会填入，清空搜索框后可重新自动填入。'
+					}
 				},
 				searchValue: {
 					sync: true,
@@ -1485,11 +1835,24 @@ export const CommonProject = Project.create({
 				document.addEventListener(
 					'selectionchange',
 					debounce(() => {
-						if (this.cfg.selectSearch) {
-							const val = document.getSelection()?.toString() || '';
-							if (val) {
-								this.cfg.searchValue = val;
-							}
+						if (!this.cfg.selectSearch) {
+							return;
+						}
+
+						// 选中内容（图片会以链接形式保留，用于 AI 识别图片题）
+						const val = getSelectionTextWithImages();
+						if (!val) {
+							return;
+						}
+
+						// 只在搜索框为空，或者里面的内容是上一次自动填入且用户没有修改过时才自动填入，
+						// 避免覆盖用户正在编辑或已经搜索的内容；清空搜索框后即可重新自动填入。
+						const autoFilledKey = 'common.online-search.auto-filled-value';
+						const current = String(this.cfg.searchValue || '');
+						const lastAutoFilled = String($store.get(autoFilledKey, '') || '');
+						if (current.trim() === '' || current === lastAutoFilled) {
+							this.cfg.searchValue = val;
+							$store.set(autoFilledKey, val);
 						}
 					}, 500)
 				);
@@ -1562,32 +1925,93 @@ export const CommonProject = Project.create({
 					 */
 					addQuestionCache: async (...questionCacheItems: QuestionCache[]) => {
 						const questionCaches: QuestionCache[] = this.cfg.localQuestionCaches;
-						for (const item of questionCacheItems) {
+						const currentScope = getQuestionCacheScope();
+
+						for (const raw of [...questionCacheItems].reverse()) {
+							const item: QuestionCache = {
+								...raw,
+								title: String(raw.title || '').trim(),
+								scope: raw.scope ?? currentScope,
+								source: getQuestionCacheSource(raw),
+								time: raw.time || Date.now()
+							};
+							item.ai = item.source === 'ai';
+							if (!item.title || !item.answer) {
+								continue;
+							}
+							const rank = QUESTION_CACHE_SOURCE_RANK[item.source as QuestionCacheSource];
+
+							const itemKey = normalizeCacheTitle(item.title);
+							// 同一课程范围内的同题缓存
+							const isPeer = (c: QuestionCache) =>
+								normalizeCacheTitle(c.title) === itemKey && (c.scope || '') === (item.scope || '');
+							// 没有课程信息的旧缓存，标准答案同样可以覆盖它
+							const isLegacy = (c: QuestionCache) =>
+								normalizeCacheTitle(c.title) === itemKey && !c.scope && Boolean(item.scope);
+
+							if (item.source === 'standard') {
+								// 标准答案：直接覆盖同题的所有旧答案（包括旧的错误答案、AI 答案）
+								for (let index = questionCaches.length - 1; index >= 0; index--) {
+									if (isPeer(questionCaches[index]) || isLegacy(questionCaches[index])) {
+										questionCaches.splice(index, 1);
+									}
+								}
+								questionCaches.unshift(item);
+								continue;
+							}
+
+							const peers = questionCaches.filter(isPeer);
+							// 已有可信度更高的答案时，不再写入
+							if (peers.some((c) => QUESTION_CACHE_SOURCE_RANK[getQuestionCacheSource(c)] > rank)) {
+								continue;
+							}
+							// 可信度更高的新答案，替换掉较低的旧答案（例如在线题库答案替换 AI 答案）
+							for (let index = questionCaches.length - 1; index >= 0; index--) {
+								const cache = questionCaches[index];
+								if (isPeer(cache) && QUESTION_CACHE_SOURCE_RANK[getQuestionCacheSource(cache)] < rank) {
+									questionCaches.splice(index, 1);
+								}
+							}
 							// 去重
-							if (questionCaches.find((c) => c.title === item.title && c.answer === item.answer) === undefined) {
+							if (!questionCaches.some((c) => isPeer(c) && c.answer === item.answer)) {
 								questionCaches.unshift(item);
 							}
 						}
 
-						// 限制数量
-						questionCaches.splice(200);
 						this.cfg.localQuestionCaches = questionCaches;
 					},
 					addQuestionCacheFromWorkResult(swr: SimplifyWorkResult[]) {
+						const scope = getQuestionCacheScope();
 						CommonProject.scripts.apps.methods.addQuestionCache(
 							...swr
 								.map((r) =>
 									r.searchInfos
 										.map((i) =>
 											i.results
-												.filter((res) => res[1])
-												.map((res) => ({
-													title: r.question,
-													answer: res[1],
-													from: i.name.replace(/【题库缓存】/g, ''),
-													homepage: i.homepage || ''
-												}))
-												.flat()
+												// 不相关的题库结果（题干相似度过低、占位答案）不写入缓存，避免污染
+												.filter(
+													(res) =>
+														res[1] &&
+														isCredibleAnswer(r.question, { question: res[0], answer: res[1], extra_data: res[2] })
+												)
+												.map((res) => {
+													const extra = (res[2] || {}) as {
+														ai?: boolean;
+														source?: QuestionCacheSource;
+														option?: string;
+														answerText?: string;
+													};
+													return {
+														title: r.question,
+														answer: res[1],
+														from: i.name.replace(/【题库缓存】/g, ''),
+														homepage: i.homepage || '',
+														scope,
+														source: extra.ai ? 'ai' : extra.source || 'bank',
+														option: extra.option,
+														content: extra.answerText
+													} as QuestionCache;
+												})
 										)
 										.flat()
 								)
@@ -1601,22 +2025,91 @@ export const CommonProject = Project.create({
 					 */
 					searchAnswerInCaches: async (
 						title: string,
-						whenSearchEmpty: () => SearchInformation[] | Promise<SearchInformation[]>
+						whenSearchEmpty: () => SearchInformation[] | Promise<SearchInformation[]>,
+						/** 当前题目的选项文字，用于校验缓存答案是否能匹配到选项（可选） */
+						optionTexts: string[] = []
 					): Promise<SearchInformation[]> => {
 						if (CommonProject.scripts.settings.cfg.enableQuestionCaches === false) {
 							return await whenSearchEmpty();
 						}
 
 						let results: SearchInformation[] = [];
-						const caches = this.cfg.localQuestionCaches;
-						for (const cache of caches) {
-							if (cache.title.trim() === title.trim()) {
-								results.push({
-									name: cache.from,
-									homepage: cache.homepage,
-									results: [{ answer: cache.answer, question: cache.title, extra_data: { ai: cache.ai, cache: true } }]
-								});
+						const scope = getQuestionCacheScope();
+						const titleKey = normalizeCacheTitle(title);
+						const allowCrossCourse = Boolean(CommonProject.scripts.settings.cfg.cacheCrossCourse);
+
+						let caches = (this.cfg.localQuestionCaches as QuestionCache[])
+							// 题干相同，并且不属于其他课程（未识别课程的旧缓存对所有课程通用）
+							.filter(
+								(cache) =>
+									normalizeCacheTitle(cache.title) === titleKey &&
+									(allowCrossCourse || !scope || !cache.scope || cache.scope === scope)
+							);
+
+						// 填空题答案里只有“第一空：”这样的标签（没有内容）的缓存是无效数据：清除；
+						// 带有标签的有效答案去掉标签，避免把“第一空：”填进输入框
+						const junkCaches = caches.filter((c) => isBlankAnswerJunk(c.answer));
+						if (junkCaches.length) {
+							const isJunk = (c: QuestionCache) =>
+								normalizeCacheTitle(c.title) === titleKey && isBlankAnswerJunk(c.answer);
+							this.cfg.localQuestionCaches = (this.cfg.localQuestionCaches as QuestionCache[]).filter(
+								(c) => !isJunk(c)
+							);
+							caches = caches.filter((c) => !isBlankAnswerJunk(c.answer));
+						}
+						caches = caches.map((c) =>
+							/第\s*[一二三四五六七八九十\d]+\s*空/.test(c.answer) ? { ...c, answer: cleanBlankAnswer(c.answer) } : c
+						);
+
+						// 只使用可信度最高的一类答案：标准答案 > 在线题库 = AI
+						const bestRank = Math.max(0, ...caches.map((c) => QUESTION_CACHE_SOURCE_RANK[getQuestionCacheSource(c)]));
+						caches = caches.filter((c) => QUESTION_CACHE_SOURCE_RANK[getQuestionCacheSource(c)] === bestRank);
+
+						// 同一类答案中，优先使用本课程的缓存
+						const sameScopeCaches = caches.filter((c) => scope && c.scope === scope);
+						if (sameScopeCaches.length) {
+							caches = sameScopeCaches;
+						}
+
+						// 缓存答案与当前选项都对不上（例如过去被模糊搜索污染的缓存）：忽略并清除这些缓存，重新搜索
+						if (
+							caches.length &&
+							!isAnswerUsableForOptions(
+								caches.map((c) => c.answer),
+								optionTexts
+							)
+						) {
+							const stale = caches.filter((c) => getQuestionCacheSource(c) !== 'standard');
+							if (stale.length) {
+								const isStale = (c: QuestionCache) =>
+									normalizeCacheTitle(c.title) === titleKey &&
+									stale.some((x) => x.answer === c.answer && x.from === c.from && (x.scope || '') === (c.scope || ''));
+								this.cfg.localQuestionCaches = (this.cfg.localQuestionCaches as QuestionCache[]).filter(
+									(c) => !isStale(c)
+								);
 							}
+							caches = [];
+						}
+
+						for (const cache of caches) {
+							const source = getQuestionCacheSource(cache);
+							results.push({
+								name: cache.from,
+								homepage: cache.homepage,
+								results: [
+									{
+										answer: cache.answer,
+										question: cache.title,
+										extra_data: {
+											ai: source === 'ai',
+											cache: true,
+											source,
+											...(cache.option ? { option: cache.option } : {}),
+											...(cache.content ? { answerText: cache.content } : {})
+										}
+									}
+								]
+							});
 						}
 						if (results.length === 0) {
 							results = await whenSearchEmpty();
@@ -1662,10 +2155,102 @@ export const CommonProject = Project.create({
 
 				const cachesBtn = h('div', { innerText: '💾 题库缓存', style: btnStyle }, (btn) => {
 					btn.onclick = () => {
-						const questionCaches = this.cfg.localQuestionCaches;
+						const countEl = h('span', ['当前缓存数量：' + this.cfg.localQuestionCaches.length]);
+						/** 重新渲染缓存列表（在下方定义） */
+						let render: () => void = () => {};
+						const updateCount = () => render();
+						const exportQuestionCaches = () => {
+							const caches = this.cfg.localQuestionCaches;
+							const blob = new Blob(
+								[
+									JSON.stringify(
+										{
+											name: `${PROJECT_NAME}题库缓存`,
+											version: 1,
+											exportedAt: new Date().toISOString(),
+											count: caches.length,
+											caches
+										},
+										null,
+										2
+									)
+								],
+								{ type: 'application/json' }
+							);
+							const url = URL.createObjectURL(blob);
+							const a = h('a', {
+								href: url,
+								download: `nanchengpai-question-cache-${new Date()
+									.toISOString()
+									.slice(0, 10)}${QUESTION_CACHE_EXPORT_EXTENSION}`
+							});
+							a.click();
+							URL.revokeObjectURL(url);
+						};
+						const importQuestionCaches = () => {
+							const input = h('input', { type: 'file', accept: '.json,.txt' });
+							input.onchange = async () => {
+								const file = input.files?.[0];
+								if (!file) {
+									return;
+								}
 
-						const list = questionCaches.map((c) =>
-							h(
+								try {
+									const json = JSON.parse(await file.text());
+									const items = normalizeQuestionCacheItems(json);
+									if (items.length === 0) {
+										$message.warn({ content: '未在文件中识别到可导入的题库缓存。', duration: 5 });
+										return;
+									}
+
+									await CommonProject.scripts.apps.methods.addQuestionCache(...items);
+									updateCount();
+									$message.success({
+										content: `已导入 ${items.length} 条题库缓存（同一题已有更可信的答案时会自动跳过）。`,
+										duration: 8
+									});
+								} catch (error) {
+									$message.error({ content: '题库缓存导入失败：文件不是有效 JSON。', duration: 8 });
+									console.error(error);
+								}
+							};
+							input.click();
+						};
+
+						const PAGE_SIZE = 100;
+						const SOURCE_LABELS: Record<QuestionCacheSource, { text: string; color: string; title: string }> = {
+							standard: { text: '标准答案', color: '#2e9e4f', title: '提交后从页面读取的标准答案，可信度最高' },
+							bank: { text: '题库', color: '#7a7a7a', title: '在线题库返回的答案' },
+							ai: { text: 'AI', color: '#2f6fed', title: 'AI 生成的答案；取得标准答案后会被自动覆盖' }
+						};
+						let keyword = '';
+						let sourceFilter: '' | QuestionCacheSource = '';
+						let limit = PAGE_SIZE;
+
+						/** 同步清理章节重做用的标签页缓存，避免删除后又被恢复 */
+						const removeFromRetakeTab = async (predicate: (cache: QuestionCache) => boolean) => {
+							try {
+								const tabCaches = ((await $store.getTab(CX_CHAPTER_RETAKE_CACHE_TAB_KEY)) || []) as QuestionCache[];
+								await $store.setTab(
+									CX_CHAPTER_RETAKE_CACHE_TAB_KEY,
+									Array.isArray(tabCaches) ? tabCaches.filter((cache) => !predicate(cache)) : []
+								);
+							} catch {}
+						};
+
+						const createCacheItem = (c: QuestionCache) => {
+							const source = getQuestionCacheSource(c);
+							const label = SOURCE_LABELS[source];
+							const meta: string[] = [];
+							if (c.scope) {
+								meta.push('课程 ' + c.scope.split(':').pop());
+							}
+							if (c.time) {
+								meta.push(new Date(c.time).toLocaleString());
+							}
+							meta.push('来自 ' + (c.from || '未知题库'));
+
+							return h(
 								'div',
 								{
 									className: 'question-cache',
@@ -1678,53 +2263,190 @@ export const CommonProject = Project.create({
 								},
 								[
 									h('div', { className: 'title' }, [
-										$ui.tooltip(
-											h(
-												'span',
-												{
-													title: `来自：${c.from || '未知题库'}\n主页：${c.homepage || '未知主页'}`,
-													style: { fontWeight: 'bold' }
-												},
-												c.title
-											)
-										)
+										h(
+											'span',
+											{
+												title: label.title,
+												style: {
+													color: '#fff',
+													background: label.color,
+													borderRadius: '4px',
+													padding: '0 6px',
+													marginRight: '6px',
+													fontSize: '12px'
+												}
+											},
+											label.text
+										),
+										h('span', { title: `主页：${c.homepage || '未知主页'}`, style: { fontWeight: 'bold' } }, c.title)
 									]),
-									h('div', { className: 'answer', style: { marginTop: '6px' } }, c.answer)
+									h(
+										'div',
+										{ className: 'answer', style: { marginTop: '6px', wordBreak: 'break-all' } },
+										(c.option && c.option !== c.answer ? c.option + '. ' : '') + c.answer
+									),
+									// 答案是图片链接（选项是图片）时显示缩略图，方便查看
+									...(extractImageUrls(c.answer).length
+										? [
+												h(
+													'div',
+													{ style: { marginTop: '4px' } },
+													extractImageUrls(c.answer).map((url) =>
+														h('img', { src: url, title: url }, (img) => {
+															img.style.maxHeight = '64px';
+															img.style.maxWidth = '120px';
+															img.style.marginRight = '6px';
+															img.style.border = '1px solid #ddd';
+															img.style.borderRadius = '4px';
+															img.onerror = () => img.remove();
+														})
+													)
+												)
+										  ]
+										: []),
+									...(c.content && c.content !== c.answer
+										? [h('div', { style: { marginTop: '4px', color: '#666' } }, '内容：' + c.content)]
+										: []),
+									h(
+										'div',
+										{ style: { marginTop: '6px', fontSize: '12px', color: '#999', wordBreak: 'break-all' } },
+										meta.join(' · ')
+									),
+									h('div', { style: { textAlign: 'right', marginTop: '6px' } }, [
+										$ui.button('删除', {}, (deleteBtn) => {
+											deleteBtn.onclick = async () => {
+												const same = (cache: QuestionCache) =>
+													cache.title === c.title &&
+													cache.answer === c.answer &&
+													cache.from === c.from &&
+													(cache.scope || '') === (c.scope || '');
+												this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
+													(cache: QuestionCache) => !same(cache)
+												);
+												await removeFromRetakeTab(same);
+												render();
+											};
+										})
+									])
 								]
-							)
-						);
+							);
+						};
 
-						const countEl = h('span', ['当前缓存数量：' + questionCaches.length]);
+						const listEl = h('div');
+						render = () => {
+							const all: QuestionCache[] = this.cfg.localQuestionCaches;
+							const matched = all.filter(
+								(c) =>
+									(!sourceFilter || getQuestionCacheSource(c) === sourceFilter) &&
+									(!keyword || c.title.includes(keyword) || c.answer.includes(keyword))
+							);
+
+							countEl.innerText =
+								matched.length === all.length
+									? `当前缓存数量：${all.length}`
+									: `当前缓存数量：${all.length}，匹配 ${matched.length} 条`;
+
+							listEl.innerHTML = '';
+							if (matched.length === 0) {
+								listEl.append(
+									h('div', { style: { textAlign: 'center' } }, all.length === 0 ? '暂无题库缓存' : '没有匹配的缓存')
+								);
+								return;
+							}
+
+							for (const c of matched.slice(0, limit)) {
+								listEl.append(createCacheItem(c));
+							}
+							if (matched.length > limit) {
+								listEl.append(
+									h('div', { style: { textAlign: 'center', margin: '8px' } }, [
+										$ui.button(`显示更多（还有 ${matched.length - limit} 条）`, {}, (moreBtn) => {
+											moreBtn.onclick = () => {
+												limit += PAGE_SIZE;
+												render();
+											};
+										})
+									])
+								);
+							}
+						};
+
+						const searchInput = h('input', {
+							type: 'search',
+							placeholder: '搜索题目或答案',
+							style: { width: '240px', padding: '4px 8px' }
+						});
+						searchInput.oninput = () => {
+							keyword = searchInput.value.trim();
+							limit = PAGE_SIZE;
+							render();
+						};
+						const sourceSelect = h('select', { style: { padding: '4px 8px' } }, [
+							h('option', { value: '' }, '全部来源'),
+							h('option', { value: 'standard' }, '标准答案'),
+							h('option', { value: 'bank' }, '在线题库'),
+							h('option', { value: 'ai' }, 'AI 答案')
+						]);
+						sourceSelect.onchange = () => {
+							sourceFilter = sourceSelect.value as '' | QuestionCacheSource;
+							limit = PAGE_SIZE;
+							render();
+						};
+
+						render();
 
 						$modal.simple({
 							width: 800,
 							content: h('div', [
 								h('div', { className: 'notes card' }, [
 									$ui.notes([
-										'题库缓存是将题库的题目和答案保存在内存，在重复使用时可以直接从内存获取，不需要再次请求题库。',
-										'以下是当前存储的题库，默认存储200题，当前页面关闭后会自动清除。'
+										'题库缓存会长期保存在脚本存储中，重复使用时可直接命中缓存，不需要再次请求题库。',
+										'答案可信度：标准答案（提交后读取）> 在线题库 = AI；同一题只会使用可信度最高的一类答案，取得标准答案后会自动覆盖旧的错误答案。',
+										'缓存会记录所属课程，不同课程中题干相同的题目互不干扰（可在全局设置中开启“跨课程使用缓存”）。',
+										'不限制缓存条数；除非手动删除/清空、导入覆盖脚本数据、卸载脚本或清理浏览器/油猴存储，否则不会自动清除，建议定期导出备份。'
 									])
 								]),
 								h('div', { className: 'card' }, [
 									$ui.space(
 										[
 											countEl,
+											$ui.button('导出题库缓存', {}, (btn) => {
+												btn.onclick = exportQuestionCaches;
+											}),
+											$ui.button('导入题库缓存', {}, (btn) => {
+												btn.onclick = importQuestionCaches;
+											}),
+											$ui.button('清除 AI 答案', {}, (btn) => {
+												btn.onclick = async () => {
+													this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
+														(cache: QuestionCache) => getQuestionCacheSource(cache) !== 'ai'
+													);
+													await removeFromRetakeTab((cache) => getQuestionCacheSource(cache) === 'ai');
+													render();
+													$message.success({ content: '已清除全部 AI 答案缓存。', duration: 5 });
+												};
+											}),
 											$ui.button('清空题库缓存', {}, (btn) => {
 												btn.onclick = () => {
-													this.cfg.localQuestionCaches = [];
-													countEl.innerText = '当前缓存数量：0';
-													list.forEach((el) => el.remove());
+													$modal.confirm({
+														content: '确定要清空全部题库缓存吗？此操作无法撤销，建议先导出备份。',
+														onConfirm: async () => {
+															this.cfg.localQuestionCaches = [];
+															try {
+																await $store.setTab(CX_CHAPTER_RETAKE_CACHE_TAB_KEY, []);
+															} catch {}
+															render();
+														}
+													});
 												};
 											})
 										],
 										{ separator: '|' }
 									)
 								]),
+								h('div', { className: 'card' }, [$ui.space([searchInput, sourceSelect])]),
 
-								h(
-									'div',
-									questionCaches.length === 0 ? [h('div', { style: { textAlign: 'center' } }, '暂无题库缓存')] : list
-								)
+								listEl
 							])
 						});
 					};

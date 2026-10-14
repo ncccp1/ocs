@@ -4,7 +4,7 @@ import { playbackRate, restudy, volume } from '../utils/configs';
 import { CommonWorkOptions, playMedia } from '../utils';
 import { searchAnswerInWrappers } from '../utils/answerer';
 import { CommonProject } from './common';
-import { commonWork, simplifyWorkResult } from '../utils/work';
+import { commonWork, optimizationElementWithImage, simplifyWorkResult } from '../utils/work';
 import { $console } from './background';
 import { waitForElement, waitForMedia } from '../utils/study';
 
@@ -767,6 +767,8 @@ function work({ answererWrappers, period, thread, answerSeparators, answerMatchM
 					const title = t.cloneNode(true) as HTMLElement;
 					title.querySelector('[name*="questionIndex"]')?.remove();
 					title.querySelector('.q_score')?.remove();
+					// 将图片链接追加到题干中，便于题库/AI 识别图片题
+					optimizationElementWithImage(title);
 					return title.innerText.trim().replace(/^、/, '') || '';
 				}
 				return '';
@@ -818,18 +820,22 @@ function work({ answererWrappers, period, thread, answerSeparators, answerMatchM
 		answerer: (elements, ctx) => {
 			const title = titleTransform(elements.title);
 			if (title) {
-				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
-					await $.sleep((period ?? 3) * 1000);
-					return searchAnswerInWrappers(
-						answererWrappers,
-						{
-							type: getType(ctx.elements.options) || 'unknown',
-							title,
-							options: ctx.elements.options.map((o) => o.innerText).join('\n')
-						},
-						'auto'
-					);
-				});
+				return CommonProject.scripts.apps.methods.searchAnswerInCaches(
+					title,
+					async () => {
+						await $.sleep((period ?? 3) * 1000);
+						return searchAnswerInWrappers(
+							answererWrappers,
+							{
+								type: getType(ctx.elements.options) || 'unknown',
+								title,
+								options: ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText).join('\n')
+							},
+							'auto'
+						);
+					},
+					ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText)
+				);
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
 			}
@@ -952,7 +958,7 @@ function aiWork({ answererWrappers, period, thread, answerSeparators, answerMatc
 			.filter((t) => t?.innerText)
 			.map((t) => {
 				if (t) {
-					return t.innerText.trim();
+					return optimizationElementWithImage(t, true).innerText.trim();
 				}
 				return '';
 			})
@@ -997,18 +1003,22 @@ function aiWork({ answererWrappers, period, thread, answerSeparators, answerMatc
 		answerer: (elements, ctx) => {
 			const title = titleTransform(elements.title);
 			if (title) {
-				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
-					await $.sleep((period ?? 3) * 1000);
-					return searchAnswerInWrappers(
-						answererWrappers,
-						{
-							type: getType(ctx.elements.options) || 'unknown',
-							title,
-							options: ctx.elements.options.map((o) => o.innerText).join('\n')
-						},
-						'auto'
-					);
-				});
+				return CommonProject.scripts.apps.methods.searchAnswerInCaches(
+					title,
+					async () => {
+						await $.sleep((period ?? 3) * 1000);
+						return searchAnswerInWrappers(
+							answererWrappers,
+							{
+								type: getType(ctx.elements.options) || 'unknown',
+								title,
+								options: ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText).join('\n')
+							},
+							'auto'
+						);
+					},
+					ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText)
+				);
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
 			}

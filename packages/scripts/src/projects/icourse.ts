@@ -506,18 +506,22 @@ function workAndExam(
 		answerer: (elements, ctx) => {
 			const title = titleTransform(elements.title);
 			if (title) {
-				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
-					await $.sleep((period ?? 3) * 1000);
-					return searchAnswerInWrappers(
-						answererWrappers,
-						{
-							type: ctx.type || 'unknown',
-							title,
-							options: ctx.elements.options.map((o) => o.innerText).join('\n')
-						},
-						'auto'
-					);
-				});
+				return CommonProject.scripts.apps.methods.searchAnswerInCaches(
+					title,
+					async () => {
+						await $.sleep((period ?? 3) * 1000);
+						return searchAnswerInWrappers(
+							answererWrappers,
+							{
+								type: ctx.type || 'unknown',
+								title,
+								options: ctx.elements.options.map((o) => o.innerText).join('\n')
+							},
+							'auto'
+						);
+					},
+					ctx.elements.options.map((o) => o.innerText)
+				);
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
 			}

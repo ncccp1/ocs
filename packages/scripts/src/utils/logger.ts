@@ -13,6 +13,13 @@ export interface PanelLog {
 }
 
 const MAX_LOGS = 200;
+/** 单条日志内容/详情的最大长度，避免日志无限增大（每次写日志都要序列化整个日志数组，过大会占用大量内存） */
+const MAX_LOG_CONTENT_LENGTH = 1000;
+const MAX_LOG_DETAIL_LENGTH = 4000;
+
+function truncate(text: string, max: number) {
+	return text.length > max ? text.slice(0, max) + `…（已截断，原长度 ${text.length}）` : text;
+}
 
 export const PANEL_LOG_NAMESPACES = {
 	system: 'render.console',
@@ -71,10 +78,10 @@ export function writePanelLog(
 	logs = logs.concat({
 		type,
 		category,
-		content,
+		content: truncate(content, MAX_LOG_CONTENT_LENGTH),
 		time: Date.now(),
-		stack: getLogStack(),
-		detail: detail === undefined ? undefined : stringifyLogValue(detail)
+		stack: getLogStack().slice(0, 600),
+		detail: detail === undefined ? undefined : truncate(stringifyLogValue(detail), MAX_LOG_DETAIL_LENGTH)
 	});
 
 	$store.set(getLogsStoreKey(namespace), logs);

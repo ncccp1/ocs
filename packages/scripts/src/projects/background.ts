@@ -36,6 +36,24 @@ const state = {
 	}
 };
 
+/** 发布文件所在目录（脚本管理器的自动更新与脚本内的更新提示都读取这里） */
+const RELEASE_BASE_URL = 'https://raw.githubusercontent.com/ncccp1/ocs/main/release/';
+/** 两次检查更新的最小间隔：6 小时 */
+const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+
+/** 比较版本号，remote 比 local 新时返回 true */
+function isNewerVersion(remote: string, local: string) {
+	const a = remote.split('.').map((n) => parseInt(n, 10) || 0);
+	const b = local.split('.').map((n) => parseInt(n, 10) || 0);
+	for (let i = 0; i < Math.max(a.length, b.length); i++) {
+		const diff = (a[i] || 0) - (b[i] || 0);
+		if (diff !== 0) {
+			return diff > 0;
+		}
+	}
+	return false;
+}
+
 type RequestList = {
 	id: string;
 	url: string;
@@ -432,21 +450,34 @@ export const BackgroundProject = Project.create({
 				},
 				ignoreVersions: {
 					defaultValue: [] as string[]
+				},
+				/** 上一次检查更新的时间戳，避免每次打开页面都请求 */
+				lastCheck: {
+					defaultValue: 0
 				}
 			},
 			methods() {
+				/** 全域名通用版使用独立的发布文件 */
+				const releaseName = () =>
+					($gm.getInfos()?.script?.name || '').includes('全域名通用版') ? 'nanchengpai.common' : 'nanchengpai';
+
 				return {
+					getDownloadUrl: () => RELEASE_BASE_URL + releaseName() + '.user.js',
 					getLastVersion: async () => {
-						const pkg = (await request(
-							'https://raw.githubusercontent.com/ncccp1/ocs/main/package.json?t=' + Date.now(),
-							{
+						let version = '';
+						try {
+							// 读取的是脚本管理器自动更新用的同一个元数据文件，保证提示的版本一定可以下载到
+							const meta = (await request(RELEASE_BASE_URL + releaseName() + '.meta.js?t=' + Date.now(), {
 								method: 'get',
 								type: 'GM_xmlhttpRequest',
-								responseType: 'json'
-							}
-						)) as { version?: string };
+								responseType: 'text'
+							})) as string;
+							version = String(meta).match(/@version\s+([0-9][0-9.]*)/)?.[1] || '';
+						} catch (e) {
+							console.warn('[update] 读取最新版本失败', e);
+						}
 						return {
-							'last-version': pkg?.version || 'unknown',
+							'last-version': version || 'unknown',
 							resource: {},
 							notes: []
 						} as { 'last-version': string; resource: Record<string, string>; notes: string[] };
@@ -463,7 +494,7 @@ export const BackgroundProject = Project.create({
 
 				const changeLog = h('button', { className: 'base-style-button-secondary' }, '📄查看更新日志');
 				changeLog.onclick = () => CommonProject.scripts.apps.methods.showChangelog();
-				const updatePage = this.startConfig?.updatePage || '';
+				const updatePage = this.methods.getDownloadUrl();
 				panel.body.replaceChildren(
 					h('div', { className: 'card' }, [
 						h('hr'),
@@ -480,8 +511,61 @@ export const BackgroundProject = Project.create({
 					version: version
 				});
 			},
-			oncomplete() {
-				// 已禁用自动更新检测
+			async oncomplete() {
+				// 只在顶层页面检查，避免页面内的 iframe 重复弹窗
+				if (window.top !== window || !this.cfg.autoNotify) {
+					return;
+				}
+				const infos = $gm.getInfos();
+				// 调试版本从本地文件加载，不检查更新
+				if (!infos || /\(dev\)/i.test(infos.script.name || '')) {
+					return;
+				}
+
+				const now = Date.now();
+				if (now - (this.cfg.lastCheck || 0) < UPDATE_CHECK_INTERVAL) {
+					return;
+				}
+				this.cfg.lastCheck = now;
+
+				const last = (await this.methods.getLastVersion())['last-version'];
+				const current = infos.script.version;
+				if (last === 'unknown' || !isNewerVersion(last, current)) {
+					return;
+				}
+
+				const today = Math.floor(now / 86400000);
+				if (this.cfg.ignoreVersions.includes(last) || this.cfg.notToday === today) {
+					return;
+				}
+
+				const url = this.methods.getDownloadUrl();
+				const ignoreLink = h('a', { style: { cursor: 'pointer' } }, '忽略此版本');
+				const modal = $modal.confirm({
+					content: h('div', [
+						h('div', `发现新版本 ${last}（当前 ${current}）。`),
+						h('div', { style: { margin: '8px 0' } }, '点击“立即更新”后，在脚本管理器的安装页面确认即可。'),
+						ignoreLink
+					]),
+					confirmButtonText: '立即更新',
+					cancelButtonText: '今天不再提示',
+					onConfirm: () => {
+						window.open(url, '_blank');
+					},
+					onCancel: () => {
+						this.cfg.notToday = today;
+					}
+				});
+				ignoreLink.onclick = () => {
+					this.cfg.ignoreVersions = [...this.cfg.ignoreVersions, last];
+					modal?.remove();
+				};
+				CommonProject.scripts.settings.methods.notificationBySetting(
+					`南城派网课助手有新版本 ${last}，当前 ${current}`,
+					{
+						extraTitle: '南城派网课助手'
+					}
+				);
 			}
 		}),
 		dev: new Script({

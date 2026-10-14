@@ -6,7 +6,7 @@ import { CommonWorkOptions, playMedia } from '../utils';
 import { searchAnswerInWrappers } from '../utils/answerer';
 import { $console } from './background';
 import { CommonProject } from './common';
-import { commonWork, simplifyWorkResult } from '../utils/work';
+import { commonWork, optimizationElementWithImage, simplifyWorkResult } from '../utils/work';
 
 type CourseType = {
 	levelName: string;
@@ -626,7 +626,7 @@ function workOrExam(
 	const titleTransform = (titles: (HTMLElement | undefined)[]) => {
 		return titles
 			.filter((t) => t?.innerText)
-			.map((t) => t?.innerText)
+			.map((t) => (t ? optimizationElementWithImage(t, true).innerText : ''))
 			.join(',');
 	};
 
@@ -643,18 +643,22 @@ function workOrExam(
 		answerer: (elements, ctx) => {
 			const title = titleTransform(elements.title);
 			if (title) {
-				return CommonProject.scripts.apps.methods.searchAnswerInCaches(title, async () => {
-					await $.sleep((period ?? 3) * 1000);
-					return searchAnswerInWrappers(
-						answererWrappers,
-						{
-							type: ctx.type || 'unknown',
-							title,
-							options: ctx.elements.options.map((o) => o.innerText).join('\n')
-						},
-						'auto'
-					);
-				});
+				return CommonProject.scripts.apps.methods.searchAnswerInCaches(
+					title,
+					async () => {
+						await $.sleep((period ?? 3) * 1000);
+						return searchAnswerInWrappers(
+							answererWrappers,
+							{
+								type: ctx.type || 'unknown',
+								title,
+								options: ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText).join('\n')
+							},
+							'auto'
+						);
+					},
+					ctx.elements.options.map((o) => optimizationElementWithImage(o, true).innerText)
+				);
 			} else {
 				throw new Error('题目为空，请查看题目是否为空，或者忽略此题');
 			}
