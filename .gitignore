@@ -143,3 +143,7 @@ dist/
 .claude/settings.local.json
 # 本地保存的超星页面（含会话参数，只用于本地调试，不提交）
 章节测验答题页面/
+
+# 界面预览（pnpm ui:preview）每次从构建产物复制
+scripts/ui-preview/index.js
+scripts/ui-preview/style.css

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>harness - 章节学习</title>
+<style>
+ body{margin:0;font-family:system-ui,"Microsoft YaHei",sans-serif;background:#f3f5f8;color:#333}
+ .top{background:#2c3e50;color:#fff;padding:10px 20px}
+ .main{display:flex;gap:16px;padding:20px}
+ .video{width:640px;height:360px;background:#111;border-radius:6px;color:#aaa;display:flex;align-items:center;justify-content:center}
+ .side{flex:1;background:#fff;border-radius:6px;padding:12px;min-height:360px}
+ h1{font-size:18px;margin:0}
+</style>
+</head>
+<body>
+<div class="top">模拟超星学习页面（预览用）</div>
+<div class="main">
+  <div><h1>5.1.6 稳态传热与非稳态传热</h1><br><div class="video">视频区域</div></div>
+  <div class="side">目录区域<br>5.1.5 传热速率与热通量<br>5.1.6 稳态传热与非稳态传热</div>
+</div>
+<script>
+(function(){
+  // ---- 油猴 API 桩（用 localStorage 持久化）----
+  var KEY='ncp-harness-gm';
+  var store={};
+  try{store=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+  var listeners={};var nid=1;
+  function persist(){try{localStorage.setItem(KEY,JSON.stringify(store))}catch(e){}}
+  window.GM_getValue=function(k,d){return (Object.prototype.hasOwnProperty.call(store,k)&&store[k]!==undefined)?JSON.parse(JSON.stringify(store[k])):d};
+  window.GM_setValue=function(k,v){var old=store[k];store[k]=(v===undefined?undefined:JSON.parse(JSON.stringify(v)));persist();(listeners[k]||[]).forEach(function(l){try{l.cb(k,old,v,false)}catch(e){console.error(e)}})};
+  window.GM_deleteValue=function(k){delete store[k];persist()};
+  window.GM_listValues=function(){return Object.keys(store)};
+  window.GM_addValueChangeListener=function(k,cb){var id=nid++;(listeners[k]=listeners[k]||[]).push({id:id,cb:cb});return id};
+  window.GM_removeValueChangeListener=function(id){Object.keys(listeners).forEach(function(k){listeners[k]=listeners[k].filter(function(l){return l.id!==id})})};
+  var tab={_urls_:[location.href, location.origin+'/knowledge/cards?harness=1']};
+  window.GM_getTab=function(cb){cb(tab)};
+  window.GM_saveTab=function(t){tab=t};
+  window.GM_notification=function(){};
+  window.GM_xmlhttpRequest=function(d){fetch(d.url,{method:d.method||'GET',headers:d.headers,body:d.data}).then(function(r){return r.text().then(function(t){d.onload&&d.onload({status:r.status,responseText:t,response:t})})}).catch(function(e){d.onerror&&d.onerror(e)});return {abort:function(){}}};
+  window.GM_getResourceText=function(){return window.__STYLE__||''};
+  window.GM_info={script:{name:'南城派网课助手',version:'4.12.46'},scriptHandler:'Harness'};
+  window.unsafeWindow=window;
+})();
+</script>
+<script src="/index.js"></script>
+<script>
+(async function(){
+  var css=await (await fetch('/style.css?'+Date.now())).text();
+  var OCS_=window.OCS;
+  var projects=OCS_.definedProjects();
+  // 预览环境不在超星域名下，去掉域名限制，让超星脚本也出现在导航里
+  projects.forEach(function(p){ if(p.name==='超星学习通'){ p.domains=[]; } });
+  OCS_.start({
+    projects: projects,
+    renderConfig:{renderScript:OCS_.RenderScript,styles:[css],defaultPanelName:OCS_.CommonProject.scripts.overview.namespace,title:'南城派-4.12.46'},
+    updatePage:''
+  });
+})();
+</script>
+</body>
+</html>

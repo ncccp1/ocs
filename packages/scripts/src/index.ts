@@ -20,6 +20,8 @@ export { ZJYProject } from './projects/zjy';
 export { IcveMoocProject } from './projects/icve';
 export { ICourseProject } from './projects/icourse';
 export { RenderScript } from './render';
+/** 任务状态：各平台上报进度，窗口读取；开发者调试时也可以直接调用 setTaskState 预览界面 */
+export * from './utils/task-state';
 
 export function definedProjects(): Project[] {
 	return [ZHSProject, CXProject, IcveMoocProject, ZJYProject, ICourseProject, CommonProject, BackgroundProject];

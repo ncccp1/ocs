@@ -20,7 +20,15 @@ import { SearchInfosElement } from '../elements/search.infos';
 import { $render } from '../utils/render';
 import { clearPanelLogs, createPanelLogger, LogType, PANEL_LOG_NAMESPACES, PanelLog } from '../utils/logger';
 import { $debug, isDebugEnabled, isDryRun } from '../utils/debug';
-import { exportDebugLogs, exportPageSnapshot, installSnapshotResponder } from '../utils/snapshot';
+import {
+	exportDebugLogs,
+	exportPageSnapshot,
+	exportPanelLogFile,
+	formatPanelLogs,
+	installSnapshotResponder
+} from '../utils/snapshot';
+import { installWorkbench } from '../utils/workbench';
+import { setUpdateInfo } from '../utils/task-state';
 
 const state = {
 	console: {
@@ -127,14 +135,46 @@ function renderLogPanel(
 	};
 
 	const list = h('div', { className: 'card console' });
-	const toolbar = h('div', { style: { marginBottom: '8px', textAlign: 'right' } }, [
-		h('button', '清空日志', (button) => {
-			button.className = 'base-style-button';
-			button.onclick = () => {
-				clearPanelLogs(namespace);
-			};
-		})
-	]);
+	const toolbarButton = (text: string, onClick: () => void, secondary = true) =>
+		h('button', text, (button) => {
+			button.className = secondary ? 'base-style-button-secondary' : 'base-style-button';
+			button.style.marginLeft = '8px';
+			button.onclick = onClick;
+		});
+
+	// 日志里的账号、令牌、密钥等会在复制和导出时自动隐去，可以放心发给别人排查问题
+	const toolbar = h(
+		'div',
+		{ style: { marginBottom: '10px', display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap' } },
+		[
+			h(
+				'span',
+				{ style: { flex: '1 1 100%', color: '#8a93a1', fontSize: '12px', marginBottom: '8px' } },
+				'复制和导出的内容已自动隐去账号、令牌和密钥'
+			),
+			toolbarButton('复制全部', () => {
+				navigator.clipboard
+					.writeText(formatPanelLogs(namespace, title))
+					.then(() => $message.success({ content: '已复制全部' + title, duration: 3 }))
+					.catch(() => $message.error({ content: '复制失败，请改用“导出文本”' }));
+			}),
+			toolbarButton('导出文本', () => {
+				const result = exportPanelLogFile(namespace, title, 'txt');
+				$message.success({ content: '已导出 ' + result.filename, duration: 5 });
+			}),
+			toolbarButton('导出 JSON', () => {
+				const result = exportPanelLogFile(namespace, title, 'json');
+				$message.success({ content: '已导出 ' + result.filename, duration: 5 });
+			}),
+			toolbarButton(
+				'清空日志',
+				() => {
+					clearPanelLogs(namespace);
+				},
+				false
+			)
+		]
+	);
 
 	const showLogs = (logs: PanelLog[]) => {
 		if (logs.length) {
@@ -237,6 +277,15 @@ export const BackgroundProject = Project.create({
 			},
 			onrender({ panel }) {
 				renderLogPanel(this, panel, 'debugLogs', PANEL_LOG_NAMESPACES.debug, '调试日志');
+			}
+		}),
+		workbench: new Script({
+			name: '工作台外壳',
+			hideInPanel: true,
+			matches: [['所有页面', /.*/]],
+			onactive() {
+				// 接管窗口外观：标题栏、导航、状态栏和收起时的圆点
+				installWorkbench();
 			}
 		}),
 		debugResponder: new Script({
@@ -580,6 +629,7 @@ export const BackgroundProject = Project.create({
 					const status: UpdateResult['status'] =
 						last === 'unknown' ? 'error' : isNewerVersion(last, current) ? 'new' : 'latest';
 					lastResult = { status, last, current, checkedAt: now };
+					setUpdateInfo(lastResult);
 					$debug.log('update', '检查更新', lastResult);
 
 					if (!manual && status === 'new' && this.cfg.autoNotify) {
@@ -841,11 +891,11 @@ export const BackgroundProject = Project.create({
 				panel.body.replaceChildren(
 					h('div', { className: 'card' }, [
 						status,
-						h('b', '页面元素'),
+						h('div', { className: 'ncp-group-title' }, '页面元素'),
 						row(structureBtn, fullBtn),
-						h('b', '日志'),
+						h('div', { className: 'ncp-group-title' }, '日志'),
 						row(logsBtn, clearDebugBtn),
-						h('b', '其他'),
+						h('div', { className: 'ncp-group-title' }, '其他'),
 						row(injectBtn, showTabDataBtn)
 					])
 				);
@@ -999,71 +1049,47 @@ export const BackgroundProject = Project.create({
 							]),
 							h(
 								'div',
-								{ style: { backgroundColor: '#292929', overflow: 'auto', maxHeight: window.innerHeight / 2 + 'px' } },
-								[
-									...(list.length === 0
-										? [h('div', { style: { color: 'white', textAlign: 'center' } }, '暂无数据')]
-										: []),
-									...list.map((item) =>
-										// @ts-ignore
-										h(
-											'div',
-											{
-												title: Object.entries(item)
-													.map(([key, val]) =>
-														key === 'time'
-															? `${key} : ${new Date(val).toLocaleString().replace(/\//g, '-')}`
-															: `${key} : ${val}`
-													)
-													.join('\n'),
-												style: {
-													maxWidth: '800px',
-													padding: '4px 0px',
-													margin: '4px 0px',
-													// @ts-ignore
-													textWrap: 'nowrap'
-												}
-											},
-											[
-												h('div', [
-													h('span', { style: { marginRight: '8px' } }, new Date(item.time).toLocaleTimeString()),
-													h(
-														'span',
-														{
-															style: {
-																backgroundColor: '#2196f3a3',
-																color: '#ececec',
-																marginRight: '8px',
-																padding: '0px 2px'
-															}
-														},
-														item.method
-													),
-													h(
-														'span',
-														{ style: { color: item.response ? '#4eb74e' : '#eb6262', marginRight: '8px' } },
-														'●'
-													),
-													h(
-														'div',
-														{ style: { display: 'inline-block', color: '#ececec' } },
-														item.url ? (item.url.length > 100 ? item.url.slice(0, 100) + '...' : item.url) : '-'
-													)
-												]),
-												h(
-													'div',
-													{ style: { overflow: 'hidden', fontSize: '12px', color: '#8f8f8f' } },
-													item.data ? 'data: ' + item.data : ''
-												),
-												h(
-													'div',
-													{ style: { overflow: 'hidden', fontSize: '12px', color: '#8f8f8f' } },
-													item.response ? 'resp: ' + item.response : item.error ? 'err : ' + item.error : ''
-												)
-											]
-										)
-									)
-								]
+								{ className: 'ncp-req-list', style: { maxHeight: window.innerHeight / 2 + 'px' } },
+								list.length === 0
+									? [h('div', { className: 'ncp-req-empty' }, '暂无数据')]
+									: list.map((item) =>
+											// @ts-ignore
+											h(
+												'div',
+												{
+													className: 'ncp-req-item',
+													title: Object.entries(item)
+														.map(([key, val]) =>
+															key === 'time'
+																? `${key} : ${new Date(val).toLocaleString().replace(/\//g, '-')}`
+																: `${key} : ${val}`
+														)
+														.join('\n')
+												},
+												[
+													h('div', { className: 'ncp-req-head' }, [
+														h('span', { className: 'ncp-req-time' }, new Date(item.time).toLocaleTimeString()),
+														h('span', { className: 'ncp-req-method' }, item.method),
+														h('span', { className: 'ncp-req-dot ' + (item.response ? 'ok' : 'fail') }),
+														h(
+															'span',
+															{ className: 'ncp-req-url' },
+															item.url ? (item.url.length > 100 ? item.url.slice(0, 100) + '...' : item.url) : '-'
+														)
+													]),
+													...(item.data ? [h('div', { className: 'ncp-req-body' }, 'data: ' + item.data)] : []),
+													...(item.response || item.error
+														? [
+																h(
+																	'div',
+																	{ className: 'ncp-req-body' },
+																	item.response ? 'resp: ' + item.response : 'err : ' + item.error
+																)
+														  ]
+														: [])
+												]
+											)
+									  )
 							)
 						])
 					);

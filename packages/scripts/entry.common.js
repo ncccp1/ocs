@@ -44,7 +44,7 @@ const infos = GM_info;
 		renderConfig: {
 			renderScript: RenderScript,
 			styles: [STYLE],
-			defaultPanelName: CommonProject.scripts.guide.namespace,
+			defaultPanelName: CommonProject.scripts.overview.namespace,
 			title: `南城派-全域名通用版-${infos.script.version}`
 		},
 		updatePage: ''

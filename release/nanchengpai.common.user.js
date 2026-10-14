@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name       				南城派网课助手 - 全域名通用版
-// @version    				4.12.46
+// @version    				4.12.47
 // @description				南城派网课助手，基于 OCSJS 二次开发，支持  【超星学习通】 【知到智慧树】 【职教云】 【智慧职教】 【中国大学MOOC】 等网课的学习、作业、考试。
 // @author     				ncccp1
 // @license    				MIT
@@ -248,7 +248,7 @@ var __publicField = (obj, key, value) => {
       lastInvokeTime = 0;
       lastArgs = lastCallTime = lastThis = timerId = void 0;
     }
-    function flush() {
+    function flush2() {
       return timerId === void 0 ? result : trailingEdge(now());
     }
     function debounced() {
@@ -272,7 +272,7 @@ var __publicField = (obj, key, value) => {
       return result;
     }
     debounced.cancel = cancel;
-    debounced.flush = flush;
+    debounced.flush = flush2;
     return debounced;
   }
   var debounce_1$1 = debounce;
@@ -295,19 +295,19 @@ var __publicField = (obj, key, value) => {
     isInBrowser() {
       return typeof window !== "undefined" && typeof window.document !== "undefined";
     },
-    elementToRawObject(el) {
+    elementToRawObject(el2) {
       return {
-        innerText: el == null ? void 0 : el.innerText,
-        innerHTML: el == null ? void 0 : el.innerHTML,
-        textContent: el == null ? void 0 : el.textContent
+        innerText: el2 == null ? void 0 : el2.innerText,
+        innerHTML: el2 == null ? void 0 : el2.innerHTML,
+        textContent: el2 == null ? void 0 : el2.textContent
       };
     },
-    onresize(el, handler) {
+    onresize(el2, handler) {
       const resize = debounce_1$1(() => {
-        if (el.parentNode === null) {
+        if (el2.parentNode === null) {
           window.removeEventListener("resize", resize);
         } else {
-          handler(el);
+          handler(el2);
         }
       }, 200);
       resize();
@@ -323,17 +323,17 @@ var __publicField = (obj, key, value) => {
       const settings = "height=" + height + ",width=" + width + ",top=" + TopPosition + ",left=" + LeftPosition + ",scrollbars=" + (scrollbars ? "yes" : "no") + ",resizable=" + (resizable ? "yes" : "no");
       return window.open(url, winName, settings);
     },
-    transition: async (el, properties, duration_ms, val, options) => {
+    transition: async (el2, properties, duration_ms, val, options) => {
       return new Promise((resolve) => {
-        const original_val = Reflect.get(el.style, properties) || "";
-        el.style.transition = `${String(properties)} ${duration_ms}s ${(options == null ? void 0 : options.timing_function) || "ease-in-out"}`;
-        Reflect.set(el.style, properties, val);
-        el.addEventListener("transitionend", function handler() {
-          el.removeEventListener("transitionend", handler);
+        const original_val = Reflect.get(el2.style, properties) || "";
+        el2.style.transition = `${String(properties)} ${duration_ms}s ${(options == null ? void 0 : options.timing_function) || "ease-in-out"}`;
+        Reflect.set(el2.style, properties, val);
+        el2.addEventListener("transitionend", function handler() {
+          el2.removeEventListener("transitionend", handler);
           setTimeout(() => {
-            Reflect.set(el.style, properties, original_val);
+            Reflect.set(el2.style, properties, original_val);
             setTimeout(() => {
-              el.style.transition = "";
+              el2.style.transition = "";
             }, duration_ms * 1e3);
           }, ((options == null ? void 0 : options.reset_ms) || 0) * 1e3);
           resolve();
@@ -478,9 +478,18 @@ var __publicField = (obj, key, value) => {
       return false;
     return true;
   }
+  function normalizeUnicode(str) {
+    try {
+      return str.normalize("NFKC");
+    } catch {
+      return str;
+    }
+  }
   function clearString(str, ...exclude) {
     exclude.push(...["①②③④⑤⑥⑦⑧⑨"]);
-    return str.trim().toLocaleLowerCase().replace(RegExp(`[^\\u2E80-\\u9FFFA-Za-z0-9${exclude.join("")}]*`, "g"), "");
+    const base = normalizeUnicode(str).trim().toLocaleLowerCase();
+    const cleaned = base.replace(RegExp(`[^\\u2E80-\\u9FFF\\p{L}\\p{N}${exclude.join("")}]+`, "gu"), "");
+    return cleaned || base.replace(/\s+/g, "");
   }
   function answerSimilar(answers, options) {
     const _answers = answers.map(removeRedundant).map((a) => clearString(a));
@@ -502,7 +511,7 @@ var __publicField = (obj, key, value) => {
     return result;
   }
   function removeRedundant(str) {
-    return (str == null ? void 0 : str.trim().replace(/^[A-Z](?:\s*[.、:：．)）]\s*|\s+)(?=[A-Za-z0-9\u2E80-\u9FFF])/, "")) || "";
+    return normalizeUnicode(str || "").trim().replace(/^[A-Z](?:\s*[.、:：．)）]\s*|\s+)(?=[A-Za-z0-9\u2E80-\u9FFF])/, "") || "";
   }
   function request(url, opts) {
     return new Promise((resolve, reject) => {
@@ -665,9 +674,9 @@ var __publicField = (obj, key, value) => {
       ReflectApply(handler, this, args);
     } else {
       var len = handler.length;
-      var listeners = arrayClone(handler, len);
+      var listeners2 = arrayClone(handler, len);
       for (var i = 0; i < len; ++i)
-        ReflectApply(listeners[i], this, args);
+        ReflectApply(listeners2[i], this, args);
     }
     return true;
   };
@@ -790,7 +799,7 @@ var __publicField = (obj, key, value) => {
   };
   EventEmitter.prototype.off = EventEmitter.prototype.removeListener;
   EventEmitter.prototype.removeAllListeners = function removeAllListeners(type) {
-    var listeners, events2, i;
+    var listeners2, events2, i;
     events2 = this._events;
     if (events2 === void 0)
       return this;
@@ -820,12 +829,12 @@ var __publicField = (obj, key, value) => {
       this._eventsCount = 0;
       return this;
     }
-    listeners = events2[type];
-    if (typeof listeners === "function") {
-      this.removeListener(type, listeners);
-    } else if (listeners !== void 0) {
-      for (i = listeners.length - 1; i >= 0; i--) {
-        this.removeListener(type, listeners[i]);
+    listeners2 = events2[type];
+    if (typeof listeners2 === "function") {
+      this.removeListener(type, listeners2);
+    } else if (listeners2 !== void 0) {
+      for (i = listeners2.length - 1; i >= 0; i--) {
+        this.removeListener(type, listeners2[i]);
       }
     }
     return this;
@@ -841,7 +850,7 @@ var __publicField = (obj, key, value) => {
       return unwrap ? [evlistener.listener || evlistener] : [evlistener];
     return unwrap ? unwrapListeners(evlistener) : arrayClone(evlistener, evlistener.length);
   }
-  EventEmitter.prototype.listeners = function listeners(type) {
+  EventEmitter.prototype.listeners = function listeners2(type) {
     return _listeners(this, type, true);
   };
   EventEmitter.prototype.rawListeners = function rawListeners(type) {
@@ -1032,9 +1041,9 @@ var __publicField = (obj, key, value) => {
       });
     }
     addChangeListener(key, listener) {
-      const listeners = MemoryStoreProvider.storeListeners.get(key) || [];
-      listeners.push(listener);
-      MemoryStoreProvider.storeListeners.set(key, listeners);
+      const listeners2 = MemoryStoreProvider.storeListeners.get(key) || [];
+      listeners2.push(listener);
+      MemoryStoreProvider.storeListeners.set(key, listeners2);
     }
     removeChangeListener(listener) {
       MemoryStoreProvider.tabListeners.forEach((lis, key) => {
@@ -1046,16 +1055,16 @@ var __publicField = (obj, key, value) => {
       });
     }
     addTabChangeListener(key, listener) {
-      const listeners = MemoryStoreProvider.tabListeners.get(key) || [];
-      listeners.push(listener);
-      MemoryStoreProvider.tabListeners.set(key, listeners);
+      const listeners2 = MemoryStoreProvider.tabListeners.get(key) || [];
+      listeners2.push(listener);
+      MemoryStoreProvider.tabListeners.set(key, listeners2);
     }
     removeTabChangeListener(key, listener) {
-      const listeners = MemoryStoreProvider.tabListeners.get(key) || [];
-      const index = listeners.findIndex((l) => l === listener);
+      const listeners2 = MemoryStoreProvider.tabListeners.get(key) || [];
+      const index = listeners2.findIndex((l) => l === listener);
       if (index !== -1) {
-        listeners.splice(index, 1);
-        MemoryStoreProvider.tabListeners.set(key, listeners);
+        listeners2.splice(index, 1);
+        MemoryStoreProvider.tabListeners.set(key, listeners2);
       }
     }
   }
@@ -1268,12 +1277,12 @@ var __publicField = (obj, key, value) => {
       isInBrowser() {
         return typeof window !== "undefined" && typeof window.document !== "undefined";
       },
-      onresize(el, handler) {
+      onresize(el2, handler) {
         const resize = (0, debounce_12.default)(() => {
-          if (el.parentNode === null) {
+          if (el2.parentNode === null) {
             window.removeEventListener("resize", resize);
           } else {
-            handler(el);
+            handler(el2);
           }
         }, 200);
         resize();
@@ -1298,8 +1307,8 @@ var __publicField = (obj, key, value) => {
         return window.open(url, winName, settings);
       }
     };
-    function resolveCustomElementName(el, target) {
-      return el.name.replace(/([A-Z])/g, target + "$1").toLowerCase().split(target).slice(1).join(target);
+    function resolveCustomElementName(el2, target) {
+      return el2.name.replace(/([A-Z])/g, target + "$1").toLowerCase().split(target).slice(1).join(target);
     }
     exports3.resolveCustomElementName = resolveCustomElementName;
   })(common);
@@ -1315,27 +1324,27 @@ var __publicField = (obj, key, value) => {
     } else {
       name = element;
     }
-    const el = document.createElement(name);
+    const el2 = document.createElement(name);
     if (attrsOrChildren) {
       if (Array.isArray(attrsOrChildren)) {
         for (const child of attrsOrChildren) {
           if (typeof child === "function") {
-            el.append(document.createElement(child.name));
+            el2.append(document.createElement(child.name));
           } else {
-            el.append(child);
+            el2.append(child);
           }
         }
       } else if (typeof attrsOrChildren === "string") {
-        el.append(attrsOrChildren);
+        el2.append(attrsOrChildren);
       } else {
         const attrs = attrsOrChildren;
         for (const key in attrs) {
           if (Object.prototype.hasOwnProperty.call(attrs, key)) {
             if (key === "style") {
-              Object.assign(el.style, attrs[key]);
+              Object.assign(el2.style, attrs[key]);
             } else {
               const value = attrs[key];
-              Reflect.set(el, key, value);
+              Reflect.set(el2, key, value);
             }
           }
         }
@@ -1343,25 +1352,25 @@ var __publicField = (obj, key, value) => {
     }
     if (childrenOrHandler) {
       if (typeof childrenOrHandler === "function") {
-        childrenOrHandler.call(el, el);
+        childrenOrHandler.call(el2, el2);
       } else if (Array.isArray(childrenOrHandler)) {
         for (const child of childrenOrHandler) {
           if (typeof child === "function") {
-            el.append(document.createElement(child.name));
+            el2.append(document.createElement(child.name));
           } else {
-            el.append(child);
+            el2.append(child);
           }
         }
       } else if (typeof childrenOrHandler === "string") {
-        el.append(childrenOrHandler);
+        el2.append(childrenOrHandler);
       }
     }
-    return el;
+    return el2;
   }
   dom.h = h;
   function $el(selector, root2 = window.document) {
-    const el = root2.querySelector(selector);
-    return el === null ? void 0 : el;
+    const el2 = root2.querySelector(selector);
+    return el2 === null ? void 0 : el2;
   }
   dom.$el = $el;
   function $$el(selector, root2 = window.document) {
@@ -1455,11 +1464,11 @@ var __publicField = (obj, key, value) => {
       notification(content, options) {
         var _a;
         const { onclick, ondone, important, duration = 30, silent = true, extraTitle = "" } = options || {};
-        const { icon, name } = ((_a = exports3.$gm.getInfos()) === null || _a === void 0 ? void 0 : _a.script) || {};
+        const { icon: icon2, name } = ((_a = exports3.$gm.getInfos()) === null || _a === void 0 ? void 0 : _a.script) || {};
         GM_notification({
           title: name + (extraTitle ? "-" + extraTitle : ""),
           text: content,
-          image: icon || "",
+          image: icon2 || "",
           highlight: important,
           onclick,
           ondone,
@@ -1580,7 +1589,7 @@ var __publicField = (obj, key, value) => {
     configsArea(configElements) {
       const configsContainer = (0, dom_1$7.h)("div", { className: "configs card" });
       const configsBody = (0, dom_1$7.h)("div", { className: "configs-body" });
-      configsBody.append(...Object.entries(configElements).map(([key, el]) => el));
+      configsBody.append(...Object.entries(configElements).map(([key, el2]) => el2));
       configsContainer.append(configsBody);
       return configsContainer;
     },
@@ -1595,10 +1604,10 @@ var __publicField = (obj, key, value) => {
               tag: config2.tag,
               sync: config2.sync,
               attrs: config2.attrs,
-              _onload: function(el) {
+              _onload: function(el2) {
                 var _a;
-                (_a = config2.onload) === null || _a === void 0 ? void 0 : _a.call(this, el);
-                onload === null || onload === void 0 ? void 0 : onload(el);
+                (_a = config2.onload) === null || _a === void 0 ? void 0 : _a.call(this, el2);
+                onload === null || onload === void 0 ? void 0 : onload(el2);
               },
               defaultValue: config2.defaultValue,
               options: config2.options,
@@ -2702,8 +2711,8 @@ var __publicField = (obj, key, value) => {
         }
       });
     }
-    setFontSize(fontsize) {
-      this.container.style.font = `${fontsize}px  Menlo, Monaco, Consolas, 'Courier New', monospace`;
+    setFontSize(fontsize2) {
+      this.container.style.font = `${fontsize2}px  Menlo, Monaco, Consolas, 'Courier New', monospace`;
     }
     setVisual(value) {
       this.container.className = "";
@@ -2777,7 +2786,7 @@ var __publicField = (obj, key, value) => {
         const name = yield utils_1.$store.getTab(utils_1.$const.TAB_CURRENT_PANEL_NAME);
         if (config2.scriptPanelLink) {
           if (isCurrentPanel(config2.scriptPanelLink.projectName, config2.scriptPanelLink, name)) {
-            this.extraMenuBar.querySelectorAll(".script-panel-link").forEach((el) => el.classList.remove("active"));
+            this.extraMenuBar.querySelectorAll(".script-panel-link").forEach((el2) => el2.classList.remove("active"));
             btn.classList.add("active");
           }
         }
@@ -2803,8 +2812,8 @@ var __publicField = (obj, key, value) => {
     }
   }
   function modal(type, attrs, parent = (start_1.$win === null || start_1.$win === void 0 ? void 0 : start_1.$win.container) || utils_1.$elements.root || document.body) {
-    const { maskCloseable = true, onConfirm, onCancel, onClose, notification: notify, notificationOptions, duration } = attrs, _attrs = __rest(attrs, ["maskCloseable", "onConfirm", "onCancel", "onClose", "notification", "notificationOptions", "duration"]);
-    if (notify) {
+    const { maskCloseable = true, onConfirm, onCancel, onClose, notification: notify2, notificationOptions, duration } = attrs, _attrs = __rest(attrs, ["maskCloseable", "onConfirm", "onCancel", "onClose", "notification", "notificationOptions", "duration"]);
+    if (notify2) {
       utils_1.$gm.notification(typeof _attrs.content === "string" ? _attrs.content : _attrs.content.textContent || "", notificationOptions);
     }
     const wrapper = (0, utils_1.h)("div", { className: "modal-wrapper" }, (wrapper2) => {
@@ -3091,7 +3100,7 @@ var __publicField = (obj, key, value) => {
   }
   function updateMenusState(win, name) {
     var _a;
-    win.root.querySelectorAll(".extra-menu-bar .script-panel-link").forEach((el) => el.classList.remove("active"));
+    win.root.querySelectorAll(".extra-menu-bar .script-panel-link").forEach((el2) => el2.classList.remove("active"));
     (_a = win.root.querySelector('.extra-menu-bar [data-name="' + name.replace(/\s/g, "_") + '"]')) === null || _a === void 0 ? void 0 : _a.classList.add("active");
   }
   var render = {};
@@ -3340,11 +3349,11 @@ var __publicField = (obj, key, value) => {
           }
           if (property === "click") {
             if (args[0] instanceof Element) {
-              const el = args[0];
+              const el2 = args[0];
               const options = args[1] || {};
-              await scrollToElement(el);
+              await scrollToElement(el2);
               await $.sleep(500);
-              const rect = el.getBoundingClientRect();
+              const rect = el2.getBoundingClientRect();
               const elFromPoint = (_a = lib.$elements.root) == null ? void 0 : _a.elementFromPoint(
                 rect.left + rect.width / 2,
                 rect.top + rect.height / 2
@@ -3357,7 +3366,7 @@ var __publicField = (obj, key, value) => {
                 }
               }
               if (configs == null ? void 0 : configs.show_debug_cursor) {
-                showMousePointer(el);
+                showMousePointer(el2);
               }
               data = {
                 page: window.location.href,
@@ -3373,11 +3382,11 @@ var __publicField = (obj, key, value) => {
                 ]
               };
             } else if (typeof args[0] === "string") {
-              const el = document.querySelector(args[0]);
-              if (el) {
-                await scrollToElement(el);
+              const el2 = document.querySelector(args[0]);
+              if (el2) {
+                await scrollToElement(el2);
                 if (configs == null ? void 0 : configs.show_debug_cursor) {
-                  showMousePointer(el);
+                  showMousePointer(el2);
                 }
               }
             }
@@ -3409,13 +3418,13 @@ var __publicField = (obj, key, value) => {
   }
   RemotePlaywright.authToken = "";
   RemotePlaywright.currentPage = void 0;
-  function scrollToElement(el) {
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  function scrollToElement(el2) {
+    el2.scrollIntoView({ behavior: "smooth", block: "center" });
     return $.sleep(200);
   }
-  function showMousePointer(el) {
+  function showMousePointer(el2) {
     setTimeout(() => {
-      const rect = el.getBoundingClientRect();
+      const rect = el2.getBoundingClientRect();
       const div = document.createElement("div");
       div.textContent = "";
       div.style.position = "fixed";
@@ -3497,16 +3506,16 @@ var __publicField = (obj, key, value) => {
       return [];
     }
     separators = separators.length === 0 ? ["===", "#", "---", "###", "|", ";", "；"] : separators;
-    separators = separators.filter((el) => el.trim().length > 0);
+    separators = separators.filter((el2) => el2.trim().length > 0);
     try {
       const json = JSON.parse(answer);
       if (Array.isArray(json)) {
-        return json.map(String).filter((el) => el.trim().length > 0);
+        return json.map(String).filter((el2) => el2.trim().length > 0);
       }
     } catch {
       for (const sep of separators) {
         if (answer.split(sep).length > 1) {
-          return answer.split(sep).filter((el) => el.trim().length > 0);
+          return answer.split(sep).filter((el2) => el2.trim().length > 0);
         }
       }
     }
@@ -3515,9 +3524,21 @@ var __publicField = (obj, key, value) => {
   function createDefaultQuestionResolver(ctx) {
     return {
       async single(infos, options, handler) {
+        var _a;
         const allAnswer = infos.map((res) => res.results.map((res2) => splitAnswer(res2.answer, ctx.answerSeparators)).flat()).flat();
         const optionStrings = options.map((o) => removeRedundant(o.innerText));
         let ratings = [];
+        for (const info of infos) {
+          for (const res of info.results) {
+            const extra = res.extra_data;
+            const letter = String((extra == null ? void 0 : extra.option) || "").trim().toUpperCase();
+            if (!(extra == null ? void 0 : extra.cache) && /^[A-H]$/.test(letter) && options[letter.charCodeAt(0) - 65] !== void 0) {
+              const target = options[letter.charCodeAt(0) - 65];
+              await handler("single", target.innerText, target, ctx);
+              return { finish: true, option: target };
+            }
+          }
+        }
         if (ctx.answerMatchMode === "similar") {
           ratings = answerSimilar(allAnswer, optionStrings);
           let index = -1;
@@ -3560,15 +3581,43 @@ var __publicField = (obj, key, value) => {
             }
           }
         }
+        for (const info of infos) {
+          for (const res of info.results) {
+            const letter = String(((_a = res.extra_data) == null ? void 0 : _a.option) || "").trim().toUpperCase();
+            if (/^[A-H]$/.test(letter) && options[letter.charCodeAt(0) - 65] !== void 0) {
+              const target = options[letter.charCodeAt(0) - 65];
+              await handler("single", target.innerText, target, ctx);
+              return { finish: true, option: target };
+            }
+          }
+        }
         return { finish: false, allAnswer, ratings: ratings.map((r) => r.rating), options: optionStrings };
       },
       async multiple(infos, options, handler) {
-        var _a;
+        var _a, _b;
         const targetAnswers = [];
         const targetOptions = [];
         const similar_list = [];
         const exact_list = [];
         const results = infos.map((info) => info.results).flat();
+        for (const result of results) {
+          const extra = result.extra_data;
+          if (extra == null ? void 0 : extra.cache) {
+            continue;
+          }
+          const letters = Array.from(
+            new Set(
+              String((extra == null ? void 0 : extra.option) || "").toUpperCase().replace(/[^A-H]/g, "").split("")
+            )
+          );
+          const targets = letters.map((char) => options[char.charCodeAt(0) - 65]).filter(Boolean);
+          if (targets.length && targets.length === letters.length) {
+            for (const target of targets) {
+              await handler("multiple", target.innerText, target, ctx);
+            }
+            return { finish: true, plainOptions: targets };
+          }
+        }
         for (let i = 0; i < results.length; i++) {
           const result = results[i];
           const answers = splitAnswer(result.answer.trim(), ctx.answerSeparators);
@@ -3656,6 +3705,22 @@ var __publicField = (obj, key, value) => {
             }
           }
         }
+        if (plainOptions.length === 0) {
+          for (const result of results) {
+            const letters = String(((_b = result.extra_data) == null ? void 0 : _b.option) || "").toUpperCase().replace(/[^A-H]/g, "");
+            for (const char of Array.from(new Set(letters.split("")))) {
+              const target = options[char.charCodeAt(0) - 65];
+              if (target === void 0) {
+                continue;
+              }
+              await handler("multiple", target.innerText, target, ctx);
+              plainOptions.push(target);
+            }
+            if (plainOptions.length) {
+              break;
+            }
+          }
+        }
         if (plainOptions.length) {
           return { finish: true, plainOptions };
         } else {
@@ -3707,17 +3772,17 @@ var __publicField = (obj, key, value) => {
           const answerShowIncorrect = answers.find((answer) => matches(answer, incorrectWords));
           if (answerShowCorrect || answerShowIncorrect) {
             let option;
-            for (const el of options) {
-              const textShowCorrect = matches(el.innerText, correctWords);
-              const textShowIncorrect = matches(el.innerText, incorrectWords);
+            for (const el2 of options) {
+              const textShowCorrect = matches(el2.innerText, correctWords);
+              const textShowIncorrect = matches(el2.innerText, incorrectWords);
               if (answerShowCorrect && textShowCorrect) {
-                option = el;
-                await handler("judgement", answerShowCorrect, el, ctx);
+                option = el2;
+                await handler("judgement", answerShowCorrect, el2, ctx);
                 break;
               }
               if (answerShowIncorrect && textShowIncorrect) {
-                option = el;
-                await handler("judgement", answerShowIncorrect, el, ctx);
+                option = el2;
+                await handler("judgement", answerShowIncorrect, el2, ctx);
                 break;
               }
             }
@@ -6350,6 +6415,10 @@ ${content}</tr>
   const RenderScript = lib.createRenderScript({
     name: "🖼️ 窗口设置"
   });
+  const fontsize = RenderScript.configs.fontsize;
+  if (fontsize) {
+    fontsize.defaultValue = 13;
+  }
   const transformImgLinkOfQuestion = (question) => {
     const dom2 = new DOMParser().parseFromString(question, "text/html");
     for (const img of Array.from(dom2.querySelectorAll("img"))) {
@@ -6619,6 +6688,11 @@ ${content}</tr>
       emit("error", module2, message2, detail);
     }
   };
+  function toggleDryRun() {
+    const next2 = !isDryRun();
+    lib.$store.set(DEBUG_STORE_KEYS.dryRun, next2);
+    return next2;
+  }
   function skipInDryRun(action, module2 = "dry-run") {
     if (!isDryRun()) {
       return false;
@@ -6708,9 +6782,9 @@ ${content}</tr>
   function escapeAttr(value) {
     return value.replace(/"/g, "&quot;").replace(/\n/g, " ");
   }
-  function serializeAttributes(el, mode) {
+  function serializeAttributes(el2, mode) {
     const parts = [];
-    for (const attr of Array.from(el.attributes)) {
+    for (const attr of Array.from(el2.attributes)) {
       const name = attr.name.toLowerCase();
       let value = attr.value;
       if (mode === "structure") {
@@ -6743,9 +6817,9 @@ ${content}</tr>
     const maxDepth = 90;
     const textMax = mode === "full" ? 2e3 : 40;
     const skipRoots = /* @__PURE__ */ new Set();
-    for (const el of [lib.$elements.root, lib.$elements.tooltipContainer]) {
-      if (el) {
-        skipRoots.add(el);
+    for (const el2 of [lib.$elements.root, lib.$elements.tooltipContainer]) {
+      if (el2) {
+        skipRoots.add(el2);
       }
     }
     const out = [];
@@ -6772,40 +6846,40 @@ ${content}</tr>
       if (node.nodeType !== Node.ELEMENT_NODE) {
         return;
       }
-      const el = node;
-      if (skipRoots.has(el) || SKIP_TAGS.has(el.tagName)) {
+      const el2 = node;
+      if (skipRoots.has(el2) || SKIP_TAGS.has(el2.tagName)) {
         return;
       }
       count++;
-      const tag = el.tagName.toLowerCase();
-      let attrs = serializeAttributes(el, mode);
+      const tag = el2.tagName.toLowerCase();
+      let attrs = serializeAttributes(el2, mode);
       if (tag === "iframe" || tag === "frame") {
         attrs += ` data-ncp-frame="${iframeIndex++}"`;
       }
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        const hidden = el instanceof HTMLInputElement && el.type === "hidden";
-        const name = el.name || el.id || "";
+      if (el2 instanceof HTMLInputElement || el2 instanceof HTMLTextAreaElement) {
+        const hidden = el2 instanceof HTMLInputElement && el2.type === "hidden";
+        const name = el2.name || el2.id || "";
         if (hidden && !SENSITIVE_NAME.test(name)) {
-          attrs += ` data-ncp-value="${escapeAttr(cut(el.value, 120))}"`;
+          attrs += ` data-ncp-value="${escapeAttr(cut(el2.value, 120))}"`;
         } else {
-          attrs += ` data-ncp-value-length="${el.value.length}"`;
+          attrs += ` data-ncp-value-length="${el2.value.length}"`;
         }
-        if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
-          attrs += ` data-ncp-checked="${el.checked}"`;
+        if (el2 instanceof HTMLInputElement && (el2.type === "checkbox" || el2.type === "radio")) {
+          attrs += ` data-ncp-checked="${el2.checked}"`;
         }
       }
-      if (el instanceof HTMLSelectElement) {
-        attrs += ` data-ncp-selected="${el.selectedIndex}"`;
+      if (el2 instanceof HTMLSelectElement) {
+        attrs += ` data-ncp-selected="${el2.selectedIndex}"`;
       }
-      if (el instanceof SVGElement && tag !== "svg") {
+      if (el2 instanceof SVGElement && tag !== "svg") {
         return;
       }
-      if (VOID_TAGS.has(el.tagName) || el.childNodes.length === 0 || tag === "svg") {
+      if (VOID_TAGS.has(el2.tagName) || el2.childNodes.length === 0 || tag === "svg") {
         out.push(`${indent}<${tag}${attrs}${tag === "svg" ? " …" : ""}/>`);
         return;
       }
       out.push(`${indent}<${tag}${attrs}>`);
-      for (const child of Array.from(el.childNodes)) {
+      for (const child of Array.from(el2.childNodes)) {
         walk(child, depth + 1);
       }
       out.push(`${indent}</${tag}>`);
@@ -6962,15 +7036,15 @@ ${content}</tr>
       return getPanelLogs(namespace).slice(-count).map((log) => ({
         time: new Date(log.time).toISOString(),
         type: log.type,
-        content: log.content,
-        detail: log.detail
+        content: redactLogText(log.content),
+        detail: log.detail ? redactLogText(log.detail) : void 0
       }));
     } catch {
       return [];
     }
   }
-  function download(filename, content) {
-    const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+  function download(filename, content, mime = "application/json") {
+    const blob = new Blob([content], { type: `${mime};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -7061,6 +7135,72 @@ ${content}</tr>
       truncated: frames.some((f) => f.truncated)
     };
   }
+  const LOG_SECRET_KEYS = [
+    ...["poolId", "userId", "user_id", "tk_uid", "tkUid", "token", "pp", "apiKey", "api_key", "api-key"],
+    ...["Authorization", "x-api-key", "enc", "puid", "uid", "cpi", "openc"]
+  ];
+  const LOG_SECRET_PATTERN = new RegExp(`("?(?:${LOG_SECRET_KEYS.join("|")})"?\\s*[:=]\\s*)("[^"]*"|[^\\s,&}"]+)`, "gi");
+  function redactLogText(text) {
+    return String(text != null ? text : "").replace(LOG_SECRET_PATTERN, (_, key, value) => {
+      return `${key}${value.startsWith('"') ? '"[redacted]"' : "[redacted]"}`;
+    }).replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]").replace(/\bsk-[A-Za-z0-9]{8,}/g, "sk-[redacted]");
+  }
+  function readableTime(time) {
+    const d = new Date(time);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  const LOG_TYPE_TEXT = { info: "信息", warn: "警告", error: "错误", debug: "调试", log: "日志" };
+  function formatPanelLogs(namespace, label) {
+    const logs = getPanelLogs(namespace);
+    const header2 = [
+      `${label}（共 ${logs.length} 条）`,
+      `导出时间：${new Date().toLocaleString()}`,
+      `页面：${redactUrl(location.href)}`,
+      ""
+    ];
+    const lines = logs.flatMap((log) => {
+      const rows = [`${readableTime(log.time)} [${LOG_TYPE_TEXT[log.type] || log.type}] ${redactLogText(log.content)}`];
+      if (log.detail) {
+        rows.push(
+          ...redactLogText(log.detail).split("\n").map((row) => "    " + row)
+        );
+      }
+      return rows;
+    });
+    return header2.concat(lines).join("\n");
+  }
+  function exportPanelLogFile(namespace, label, format = "txt") {
+    var _a, _b;
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    const base = `ncp-${label.replace(/[^\u4e00-\u9fa5A-Za-z0-9]+/g, "")}-${stamp}`;
+    let content;
+    if (format === "json") {
+      const infos = lib.$gm.getInfos();
+      content = JSON.stringify(
+        {
+          kind: "ncp-logs",
+          label,
+          createdAt: new Date().toISOString(),
+          script: { name: (_a = infos == null ? void 0 : infos.script) == null ? void 0 : _a.name, version: (_b = infos == null ? void 0 : infos.script) == null ? void 0 : _b.version },
+          page: redactUrl(location.href),
+          logs: getPanelLogs(namespace).map((log) => ({
+            time: new Date(log.time).toISOString(),
+            type: log.type,
+            content: redactLogText(log.content),
+            detail: log.detail ? redactLogText(log.detail) : void 0
+          }))
+        },
+        null,
+        1
+      );
+    } else {
+      content = formatPanelLogs(namespace, label);
+    }
+    const filename = `${base}.${format}`;
+    download(filename, content, format === "json" ? "application/json" : "text/plain");
+    return { filename, size: content.length };
+  }
   function exportDebugLogs() {
     var _a, _b;
     const infos = lib.$gm.getInfos();
@@ -7083,6 +7223,994 @@ ${content}</tr>
     download(filename, content);
     return { filename, size: content.length };
   }
+  const PATHS = {
+    play: '<polygon points="7 4 19 12 7 20 7 4"/>',
+    pause: '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
+    skip: '<polygon points="5 5 15 12 5 19 5 5"/><line x1="19" y1="5" x2="19" y2="19"/>',
+    check: '<polyline points="5 12.5 10 17.5 19 7"/>',
+    x: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
+    minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
+    expand: '<polyline points="15 4 20 4 20 9"/><line x1="20" y1="4" x2="13" y2="11"/><polyline points="9 20 4 20 4 15"/><line x1="4" y1="20" x2="11" y2="13"/>',
+    headphones: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1"/><rect x="17" y="14" width="4" height="6" rx="1"/>',
+    file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/>',
+    pencil: '<path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/><line x1="14" y1="7" x2="17" y2="10"/>',
+    notebook: '<rect x="6" y="3" width="13" height="18" rx="2"/><line x1="10" y1="8" x2="15" y2="8"/><line x1="10" y1="12" x2="15" y2="12"/><line x1="3" y1="7" x2="6" y2="7"/><line x1="3" y1="12" x2="6" y2="12"/><line x1="3" y1="17" x2="6" y2="17"/>',
+    clipboard: '<rect x="6" y="5" width="12" height="16" rx="2"/><rect x="9" y="3" width="6" height="4" rx="1"/><polyline points="9 14 11 16 15 12"/>',
+    sparkles: '<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/><path d="M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z"/>',
+    shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12" y2="16.5"/>',
+    alert: '<path d="M12 4l9 16H3z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17.5"/>',
+    flask: '<path d="M9 3h6"/><path d="M10 3v6L5 19a1.5 1.5 0 0 0 1.3 2h11.4A1.5 1.5 0 0 0 19 19l-5-10V3"/><line x1="8" y1="14" x2="16" y2="14"/>',
+    loader: '<line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/><line x1="6.3" y1="6.3" x2="8.4" y2="8.4"/><line x1="15.6" y1="15.6" x2="17.7" y2="17.7"/><line x1="6.3" y1="17.7" x2="8.4" y2="15.6"/><line x1="15.6" y1="8.4" x2="17.7" y2="6.3"/>',
+    school: '<path d="M3 9l9-5 9 5-9 5z"/><path d="M7 11.5V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5"/><line x1="21" y1="9" x2="21" y2="15"/>',
+    dashboard: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="5" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="11" width="7" height="9" rx="1"/>',
+    sliders: '<line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6"/><line x1="15" y1="15" x2="20" y2="20"/>',
+    terminal: '<polyline points="5 8 9 12 5 16"/><line x1="12" y1="17" x2="19" y2="17"/>',
+    download: '<line x1="12" y1="4" x2="12" y2="15"/><polyline points="7 11 12 16 17 11"/><line x1="5" y1="20" x2="19" y2="20"/>',
+    package: '<path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><polyline points="3 8 12 13 21 8"/><line x1="12" y1="13" x2="12" y2="21"/>',
+    book: '<path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><line x1="8" y1="8" x2="14" y2="8"/>',
+    bug: '<rect x="8" y="9" width="8" height="10" rx="4"/><line x1="12" y1="9" x2="12" y2="19"/><line x1="4" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="20" y2="12"/><path d="M9 9a3 3 0 0 1 6 0"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><line x1="12" y1="17" x2="12" y2="17.5"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+    moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    refresh: '<path d="M20 11a8 8 0 0 0-14-4L4 9"/><polyline points="4 4 4 9 9 9"/><path d="M4 13a8 8 0 0 0 14 4l2-2"/><polyline points="20 20 20 15 15 15"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    apps: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
+    chevron: '<polyline points="9 6 15 12 9 18"/>',
+    database: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
+    upload: '<line x1="12" y1="20" x2="12" y2="9"/><polyline points="7 13 12 8 17 13"/><line x1="5" y1="4" x2="19" y2="4"/>'
+  };
+  function icon(name, size = 16) {
+    const path = PATHS[name] || PATHS.help;
+    return `<svg class="ncp-icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+  }
+  const TASK_KIND_LABEL = {
+    video: "视频",
+    audio: "音频",
+    document: "文档",
+    quiz: "章节测验",
+    homework: "作业",
+    exam: "考试",
+    other: "任务"
+  };
+  const TASK_STATUS_LABEL = {
+    idle: "待机",
+    running: "运行中",
+    attention: "需要处理",
+    paused: "已暂停",
+    done: "已完成",
+    error: "出错"
+  };
+  const STATE_KEY = "ncp.task-state";
+  const COMMAND_KEY = "ncp.task-command";
+  const TASK_STALE_MS = 30 * 1e3;
+  const FLUSH_INTERVAL = 500;
+  const HEARTBEAT_INTERVAL = 5 * 1e3;
+  function createIdle() {
+    return { kind: "other", status: "idle", title: "", progress: null, updatedAt: 0 };
+  }
+  let local = createIdle();
+  const listeners = /* @__PURE__ */ new Set();
+  let flushTimer;
+  let lastFlush = 0;
+  let heartbeat;
+  let syncInstalled = false;
+  let owner = false;
+  function notify() {
+    listeners.forEach((listener) => {
+      try {
+        listener(local);
+      } catch (error) {
+        console.warn("[task-state] 监听器出错", error);
+      }
+    });
+  }
+  async function flush() {
+    flushTimer = void 0;
+    lastFlush = Date.now();
+    try {
+      await lib.$store.setTab(STATE_KEY, local);
+    } catch {
+    }
+  }
+  function scheduleFlush() {
+    if (flushTimer) {
+      return;
+    }
+    const wait = Math.max(0, FLUSH_INTERVAL - (Date.now() - lastFlush));
+    flushTimer = setTimeout(flush, wait);
+  }
+  function ensureHeartbeat() {
+    if (heartbeat) {
+      return;
+    }
+    heartbeat = setInterval(() => {
+      if (owner && (local.status === "running" || local.status === "attention" || local.status === "paused")) {
+        local = { ...local, updatedAt: Date.now() };
+        scheduleFlush();
+      }
+    }, HEARTBEAT_INTERVAL);
+  }
+  function installTaskStateSync() {
+    if (syncInstalled) {
+      return;
+    }
+    syncInstalled = true;
+    try {
+      lib.$store.getTab(STATE_KEY).then((value) => {
+        const stored = value;
+        if (stored && stored.updatedAt > local.updatedAt) {
+          local = stored;
+          notify();
+        }
+      });
+      lib.$store.addTabChangeListener(STATE_KEY, (curr) => {
+        if (curr && curr.updatedAt >= local.updatedAt) {
+          if (curr.updatedAt > local.updatedAt) {
+            owner = false;
+          }
+          local = curr;
+          notify();
+        }
+      });
+    } catch {
+    }
+  }
+  function getTaskState() {
+    return local;
+  }
+  function isTaskStale(state2 = local) {
+    return (state2.status === "running" || state2.status === "attention") && state2.updatedAt > 0 && Date.now() - state2.updatedAt > TASK_STALE_MS;
+  }
+  function setTaskState(patch) {
+    var _a;
+    installTaskStateSync();
+    owner = true;
+    const now2 = Date.now();
+    const startsNew = patch.kind !== void 0 && patch.kind !== local.kind;
+    local = {
+      ...local.status === "done" || local.status === "idle" || startsNew ? { ...createIdle(), platform: local.platform, steps: local.steps, sources: local.sources } : local,
+      ...patch,
+      startedAt: (_a = patch.startedAt) != null ? _a : startsNew || local.status === "idle" || local.status === "done" ? now2 : local.startedAt,
+      updatedAt: now2
+    };
+    ensureHeartbeat();
+    notify();
+    scheduleFlush();
+  }
+  function finishTask(message2) {
+    setTaskState({ status: "done", progress: 1, busy: void 0, message: message2, canSkip: false });
+  }
+  function clearTaskState() {
+    owner = true;
+    local = { ...createIdle(), updatedAt: Date.now() };
+    notify();
+    scheduleFlush();
+  }
+  function onTaskStateChange(listener) {
+    installTaskStateSync();
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }
+  function upsertTaskStep(step) {
+    const steps = [...local.steps || []];
+    const index = steps.findIndex((item) => item.id === step.id);
+    if (index === -1) {
+      steps.push({ kind: "other", title: "任务点", status: "pending", ...step });
+    } else {
+      steps[index] = { ...steps[index], ...step };
+    }
+    const keep = { status: local.status, kind: local.kind, title: local.title, progress: local.progress };
+    setTaskState({ steps, ...keep });
+  }
+  function resetTaskSteps() {
+    setTaskState({ steps: [], sources: { cache: 0, bank: 0, ai: 0 } });
+  }
+  const busyCounters = { search: 0, ai: 0, captcha: 0 };
+  function currentBusy() {
+    return busyCounters.captcha > 0 ? "captcha" : busyCounters.ai > 0 ? "ai" : busyCounters.search > 0 ? "search" : void 0;
+  }
+  function beginBusy(kind, message2) {
+    busyCounters[kind]++;
+    const busy = currentBusy();
+    setTaskState({
+      busy,
+      ...kind === "captcha" ? { status: "attention", message: message2 || "需要你手动处理" } : {}
+    });
+    let ended = false;
+    return () => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      busyCounters[kind] = Math.max(0, busyCounters[kind] - 1);
+      const next2 = currentBusy();
+      setTaskState({
+        busy: next2,
+        ...kind === "captcha" && busyCounters.captcha === 0 && local.status === "attention" ? { status: "running", message: void 0 } : {}
+      });
+    };
+  }
+  function updateTaskFromResults(results, options) {
+    const total = results.length;
+    let resolved = 0;
+    let currentIndex = -1;
+    const sources = { cache: 0, bank: 0, ai: 0 };
+    const questions = results.map((result, index) => {
+      var _a, _b;
+      if (result.resolved) {
+        resolved++;
+        if ((_a = result.result) == null ? void 0 : _a.finish) {
+          const infos = ((_b = result.ctx) == null ? void 0 : _b.searchInfos) || [];
+          const extras = infos.flatMap((info) => (info.results || []).map((r) => r.extra_data));
+          if (extras.some((extra) => extra == null ? void 0 : extra.cache)) {
+            sources.cache++;
+          } else if (extras.some((extra) => extra == null ? void 0 : extra.ai)) {
+            sources.ai++;
+          } else {
+            sources.bank++;
+          }
+          return "ok";
+        }
+        return "miss";
+      }
+      if (currentIndex === -1) {
+        currentIndex = index;
+      }
+      return "pending";
+    });
+    if (currentIndex !== -1 && !options.finished) {
+      questions[currentIndex] = "cur";
+    }
+    setTaskState({
+      kind: options.kind,
+      status: options.finished ? "done" : "running",
+      ...options.title ? { title: options.title } : {},
+      total,
+      current: resolved,
+      progress: total ? resolved / total : null,
+      questions,
+      sources,
+      canSkip: false
+    });
+  }
+  function trackMediaProgress(media, options) {
+    let lastReport = 0;
+    const report = (force = false) => {
+      var _a;
+      const now2 = Date.now();
+      if (!force && now2 - lastReport < 1e3) {
+        return;
+      }
+      lastReport = now2;
+      const duration = media.duration;
+      const valid = Number.isFinite(duration) && duration > 0;
+      setTaskState({
+        kind: options.kind || "video",
+        ...options.title ? { title: options.title } : {},
+        ...options.platform ? { platform: options.platform } : {},
+        status: local.status === "paused" || local.status === "attention" ? local.status : "running",
+        progress: valid ? Math.min(1, media.currentTime / duration) : null,
+        remainingSeconds: valid ? Math.max(0, Math.round(duration - media.currentTime)) : void 0,
+        canSkip: (_a = options.canSkip) != null ? _a : true
+      });
+    };
+    const onTime = () => report();
+    const onEnded = () => report(true);
+    media.addEventListener("timeupdate", onTime);
+    media.addEventListener("ended", onEnded);
+    report(true);
+    return () => {
+      media.removeEventListener("timeupdate", onTime);
+      media.removeEventListener("ended", onEnded);
+    };
+  }
+  function sendTaskCommand(command) {
+    return lib.$store.setTab(COMMAND_KEY, { command, id: Math.random().toString(16).slice(2), time: Date.now() });
+  }
+  function onTaskCommand(handler) {
+    let lastId = "";
+    let listenerId;
+    let cancelled = false;
+    Promise.resolve(
+      lib.$store.addTabChangeListener(COMMAND_KEY, (curr) => {
+        if (cancelled || !curr || curr.id === lastId) {
+          return;
+        }
+        if (Date.now() - curr.time > 10 * 1e3) {
+          return;
+        }
+        lastId = curr.id;
+        handler(curr.command);
+      })
+    ).then((id) => {
+      listenerId = id;
+    });
+    return () => {
+      cancelled = true;
+      try {
+        lib.$store.removeTabChangeListener(COMMAND_KEY, listenerId);
+      } catch {
+      }
+    };
+  }
+  function getTabId() {
+    return lib.$store.getTab(lib.$const.TAB_UID);
+  }
+  let userPaused = false;
+  function isUserPaused() {
+    return userPaused;
+  }
+  function registerMediaControl(media, onSkip) {
+    userPaused = false;
+    return onTaskCommand((command) => {
+      if (command === "pause") {
+        userPaused = true;
+        media.pause();
+        setTaskState({ status: "paused" });
+      } else if (command === "resume") {
+        userPaused = false;
+        media.play().catch(() => void 0);
+        setTaskState({ status: "running" });
+      } else if (command === "skip") {
+        onSkip == null ? void 0 : onSkip();
+      }
+    });
+  }
+  function toggleTaskPause() {
+    return sendTaskCommand(local.status === "paused" ? "resume" : "pause");
+  }
+  let updateInfo;
+  const updateListeners = /* @__PURE__ */ new Set();
+  function setUpdateInfo(info) {
+    updateInfo = info;
+    updateListeners.forEach((listener) => listener(info));
+  }
+  function getUpdateInfo() {
+    return updateInfo;
+  }
+  function onUpdateInfoChange(listener) {
+    updateListeners.add(listener);
+    return () => updateListeners.delete(listener);
+  }
+  function attachMediaToTask(media, options) {
+    const stopTrack = trackMediaProgress(media, {
+      kind: options.kind || "video",
+      title: options.title || document.title,
+      platform: options.platform,
+      canSkip: Boolean(options.onSkip)
+    });
+    const stopControl = registerMediaControl(media, options.onSkip);
+    return () => {
+      stopTrack();
+      stopControl();
+    };
+  }
+  const RING_COLOR = {
+    run: "#3ddc84",
+    busy: "#5ea8ff",
+    warn: "#e8b339",
+    pause: "#8b93a1",
+    done: "#2fbf9b",
+    err: "#f0605d",
+    idle: "#5f6b7a"
+  };
+  const KIND_ICON$1 = {
+    video: "play",
+    audio: "headphones",
+    document: "file",
+    quiz: "pencil",
+    homework: "notebook",
+    exam: "clipboard",
+    other: "school"
+  };
+  function formatSeconds(total) {
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  function buildView(raw) {
+    var _a;
+    const stale = isTaskStale(raw);
+    const state2 = stale ? { ...raw, status: "idle", busy: void 0 } : raw;
+    const percent = state2.progress === null || state2.progress === void 0 ? null : Math.round(state2.progress * 100);
+    let iconName = KIND_ICON$1[state2.kind];
+    let color = RING_COLOR.run;
+    let label = TASK_KIND_LABEL[state2.kind];
+    if (state2.status === "idle") {
+      iconName = "moon";
+      color = RING_COLOR.idle;
+      label = "待机";
+    } else if (state2.status === "done") {
+      iconName = "check";
+      color = RING_COLOR.done;
+      label = "全部完成";
+    } else if (state2.status === "error") {
+      iconName = "alert";
+      color = RING_COLOR.err;
+      label = "出错";
+    } else if (state2.status === "attention" || state2.busy === "captcha") {
+      iconName = "shield";
+      color = RING_COLOR.warn;
+      label = "需要你处理";
+    } else if (state2.status === "paused") {
+      iconName = "pause";
+      color = RING_COLOR.pause;
+      label = `已暂停 · ${TASK_KIND_LABEL[state2.kind]}`;
+    } else if (state2.busy === "ai") {
+      iconName = "sparkles";
+      color = RING_COLOR.busy;
+      label = `AI 思考 · ${TASK_KIND_LABEL[state2.kind]}`;
+    } else if (state2.busy === "search") {
+      color = RING_COLOR.busy;
+      label = `${TASK_KIND_LABEL[state2.kind]} · 搜题中`;
+    }
+    const isQuestionTask = state2.kind === "quiz" || state2.kind === "homework" || state2.kind === "exam";
+    if (state2.total && isQuestionTask && state2.status !== "idle" && state2.status !== "done") {
+      label += ` · ${(_a = state2.current) != null ? _a : 0}/${state2.total}`;
+    }
+    let detail = state2.title || "";
+    if (state2.status === "attention" && state2.message) {
+      detail = state2.message;
+    } else if (state2.status === "error" && state2.message) {
+      detail = state2.message;
+    } else if (state2.status === "idle") {
+      detail = stale ? "页面已离开或没有响应" : "没有进行中的任务";
+    } else if (!isQuestionTask && state2.remainingSeconds !== void 0 && state2.status === "running") {
+      detail = `剩余 ${formatSeconds(state2.remainingSeconds)}${state2.title ? " · " + state2.title : ""}`;
+    }
+    return {
+      status: state2.status,
+      icon: iconName,
+      color,
+      percent: state2.status === "done" ? 100 : percent,
+      indeterminate: state2.status === "running" && percent === null,
+      label,
+      detail,
+      kind: state2.kind,
+      title: state2.title || "",
+      canSkip: Boolean(state2.canSkip) && (state2.status === "running" || state2.status === "paused")
+    };
+  }
+  const NAV_ICON = {
+    "common.overview": "dashboard",
+    "common.guide": "book",
+    "common.settings": "sliders",
+    "common.work-results": "search",
+    "common.online-search": "search",
+    "common.apps": "apps",
+    "render.panel": "expand",
+    "render.console": "terminal",
+    "render.search-console": "search",
+    "render.debug-console": "bug",
+    "background.app": "refresh",
+    "background.update": "download",
+    "background.dev": "bug"
+  };
+  const NAV_GROUP_OF_NAMESPACE = {
+    "common.overview": "总览",
+    "common.work-results": "工具",
+    "common.online-search": "工具",
+    "common.apps": "工具",
+    "common.settings": "设置",
+    "render.panel": "设置",
+    "background.app": "设置",
+    "render.console": "记录",
+    "render.search-console": "记录",
+    "render.debug-console": "记录",
+    "background.update": "系统",
+    "background.dev": "系统",
+    "common.guide": "帮助"
+  };
+  const NAV_GROUP_ORDER = ["总览", "__platform__", "工具", "设置", "记录", "系统", "帮助"];
+  function stripEmoji(name) {
+    return name.replace(/^[^一-龥A-Za-z0-9]+/, "").trim();
+  }
+  function navIconOf(script2, projectName) {
+    if (script2.namespace && NAV_ICON[script2.namespace]) {
+      return NAV_ICON[script2.namespace];
+    }
+    if (projectName === "后台" && script2.name.includes("请求")) {
+      return "link";
+    }
+    if (/作业|考试|答题/.test(script2.name)) {
+      return "notebook";
+    }
+    if (/阅读/.test(script2.name)) {
+      return "file";
+    }
+    if (/学习|课程/.test(script2.name)) {
+      return "play";
+    }
+    if (/提示|教程/.test(script2.name)) {
+      return "help";
+    }
+    return "chevron";
+  }
+  async function collectNav() {
+    const urls = await lib.$store.getTab(lib.$const.TAB_URLS) || [location.href];
+    const groups = /* @__PURE__ */ new Map();
+    const push = (title, item) => {
+      const list = groups.get(title) || [];
+      list.push(item);
+      groups.set(title, list);
+    };
+    for (const project2 of definedProjects()) {
+      const scripts = lib.$.getMatchedScripts([project2], urls).filter((s) => !s.hideInPanel);
+      for (const script2 of scripts) {
+        const item = {
+          id: `${project2.name}-${script2.name}`,
+          label: stripEmoji(script2.name),
+          icon: navIconOf(script2, project2.name),
+          script: script2,
+          projectName: project2.name
+        };
+        const isPlatform = project2.name !== "通用" && project2.name !== "后台";
+        if (isPlatform) {
+          push(project2.name, item);
+        } else {
+          push(
+            script2.namespace && NAV_GROUP_OF_NAMESPACE[script2.namespace] || (project2.name === "后台" ? "记录" : "工具"),
+            item
+          );
+        }
+      }
+    }
+    const platformTitles = Array.from(groups.keys()).filter((title) => !NAV_GROUP_ORDER.includes(title));
+    const ordered = [];
+    for (const title of NAV_GROUP_ORDER) {
+      if (title === "__platform__") {
+        for (const platform of platformTitles) {
+          ordered.push({ title: platform, items: groups.get(platform) || [] });
+        }
+      } else if (groups.has(title)) {
+        ordered.push({ title, items: groups.get(title) || [] });
+      }
+    }
+    return ordered;
+  }
+  function describeUpload(value) {
+    if (value === "save")
+      return "答完自动保存";
+    if (value === "nomove")
+      return "答完不提交";
+    if (value === "force")
+      return "答完强制提交";
+    if (value === "100" || value === 100)
+      return "全部命中才提交";
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? `${n}% 自动提交` : "";
+  }
+  function describeJump(mode) {
+    if (mode === "next")
+      return "完成后跳转下一节";
+    if (mode === "job")
+      return "跳转未完成任务点";
+    if (mode === "manually")
+      return "完成后手动跳转";
+    return "";
+  }
+  function statusBarItems() {
+    var _a, _b, _c;
+    const items = [];
+    try {
+      const settings = CommonProject.scripts.settings.cfg;
+      const wrappers = settings.answererWrappers || [];
+      const metoReady = Boolean(settings.metoTkUid) && Boolean(settings.metoPoolId || settings.metoUserId && settings.metoPp);
+      if (wrappers.length) {
+        const names = wrappers.map((w) => w.name || "").join(" ");
+        items.push({
+          icon: "book",
+          text: names.includes("MeTo") && !metoReady ? "MeTo 未配置" : `题库 ${wrappers.length} 个`,
+          warn: names.includes("MeTo") && !metoReady
+        });
+      } else {
+        items.push({ icon: "book", text: "未配置题库", warn: !(settings.aiEnable && settings.aiApiKey) });
+      }
+      const aiOn = settings.aiEnable === true || settings.aiEnable === "true";
+      items.push({
+        icon: "sparkles",
+        text: aiOn ? settings.aiApiKey ? "AI 已开启" : "AI 缺少 Key" : "AI 未开启",
+        warn: aiOn && !settings.aiApiKey
+      });
+      const upload = describeUpload(settings.upload);
+      if (upload)
+        items.push({ icon: "check", text: upload });
+    } catch {
+    }
+    try {
+      const cx = (_c = (_b = (_a = definedProjects().find((p) => p.name === "超星学习通")) == null ? void 0 : _a.scripts) == null ? void 0 : _b.study) == null ? void 0 : _c.cfg;
+      const jump = describeJump(cx == null ? void 0 : cx.mode);
+      if (jump)
+        items.push({ icon: "skip", text: jump });
+    } catch {
+    }
+    return items;
+  }
+  let installed = false;
+  function el(tag, className, html) {
+    const node = document.createElement(tag);
+    if (className)
+      node.className = className;
+    if (html !== void 0)
+      node.innerHTML = html;
+    return node;
+  }
+  function installWorkbench() {
+    if (installed) {
+      return;
+    }
+    try {
+      if (self !== top) {
+        return;
+      }
+    } catch {
+      return;
+    }
+    installed = true;
+    installTaskStateSync();
+    let tries = 0;
+    const timer = setInterval(() => {
+      const root2 = lib.$elements.root;
+      const container2 = root2 == null ? void 0 : root2.querySelector("container-element");
+      if (container2 && container2.querySelector("header-element")) {
+        clearInterval(timer);
+        try {
+          build(container2);
+        } catch (error) {
+          console.error("[workbench] 构建窗口外壳失败，保留原有界面", error);
+        }
+      } else if (++tries > 150) {
+        clearInterval(timer);
+      }
+    }, 200);
+  }
+  function build(container2) {
+    var _a;
+    const infos = lib.$gm.getInfos();
+    const version = ((_a = infos == null ? void 0 : infos.script) == null ? void 0 : _a.version) || "";
+    const sessionStart = Date.now();
+    const titlebar = el("div", "ncp-titlebar");
+    const logo = el("span", "ncp-logo", icon("school", 18));
+    const name = el("span", "ncp-name", "南城派");
+    const ver = el("span", "ncp-ver", version);
+    const chip = el("span", "ncp-chip");
+    const taskTitle = el("span", "ncp-task-title");
+    const spacer = el("span", "ncp-spacer");
+    const btnPause = el("button", "ncp-btn primary");
+    const btnSkip = el("button", "ncp-btn", `${icon("skip", 14)}<span>跳过</span>`);
+    const btnDry = el("button", "ncp-btn", `${icon("flask", 14)}<span>试运行</span>`);
+    const btnMin = el("button", "ncp-btn icon-only", icon("minus", 16));
+    btnMin.title = "收起为小圆点";
+    btnSkip.title = "跳过当前任务点（仅视频、音频等支持）";
+    btnDry.title = "试运行：照常答题，但不提交、不保存、不跳转";
+    titlebar.append(logo, name, ver, chip, taskTitle, spacer, btnPause, btnSkip, btnDry, btnMin);
+    const nav = el("div", "ncp-nav");
+    const statusbar = el("div", "ncp-statusbar");
+    const statusItems = el("div", "ncp-status-items");
+    const statusRight = el("div", "ncp-status-right");
+    statusbar.append(statusItems, statusRight);
+    const dot = el("div", "ncp-dot");
+    const circ = 2 * Math.PI * 18;
+    const capsule = el("div", "ncp-capsule");
+    const capBody = el("div", "ncp-cap-body");
+    const capPct = el("b", "ncp-cap-pct");
+    const capText = el("div", "ncp-cap-text");
+    const capPause = el("button", "ncp-cap-btn", icon("pause", 12));
+    capPause.title = "暂停 / 继续";
+    capBody.title = "点击展开窗口";
+    capBody.append(capPct, capText, capPause);
+    const capBar = el("i", "ncp-cap-bar");
+    capsule.append(capBody, capBar);
+    dot.append(capsule);
+    const ring = el(
+      "div",
+      "ncp-dot-face",
+      `<svg class="ncp-dot-ring" width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="21" fill="#1f2937"/><circle cx="22" cy="22" r="18" fill="none" stroke="#3b4350" stroke-width="3"/><circle class="ncp-dot-arc" cx="22" cy="22" r="18" fill="none" stroke="#3ddc84" stroke-width="3" stroke-linecap="round" stroke-dasharray="0 ${circ.toFixed(1)}" transform="rotate(-90 22 22)"/></svg><span class="ncp-dot-icon"></span><span class="ncp-badge tl"></span><span class="ncp-badge br"></span>`
+    );
+    dot.append(ring);
+    const dotArc = dot.querySelector(".ncp-dot-arc");
+    const dotIcon = dot.querySelector(".ncp-dot-icon");
+    const badgeTl = dot.querySelector(".ncp-badge.tl");
+    const badgeBr = dot.querySelector(".ncp-badge.br");
+    container2.append(titlebar, nav, statusbar, dot);
+    const MARGIN = 8;
+    const clampIntoViewport = () => {
+      const rect = container2.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        return;
+      }
+      const maxLeft = Math.max(MARGIN, window.innerWidth - rect.width - MARGIN);
+      const maxTop = Math.max(MARGIN, window.innerHeight - rect.height - MARGIN);
+      const left = Math.min(Math.max(MARGIN, rect.left), maxLeft);
+      const top2 = Math.min(Math.max(MARGIN, rect.top), maxTop);
+      if (Math.abs(left - rect.left) > 0.5 || Math.abs(top2 - rect.top) > 0.5) {
+        container2.style.left = left + "px";
+        container2.style.top = top2 + "px";
+      }
+    };
+    const savePosition = () => {
+      clampIntoViewport();
+      RenderScript.cfg.x = container2.offsetLeft;
+      RenderScript.cfg.y = container2.offsetTop;
+    };
+    lib.enableElementDraggable(titlebar, container2, savePosition);
+    lib.enableElementDraggable(dot, container2, savePosition);
+    let downX = 0;
+    let downY = 0;
+    dot.addEventListener("mousedown", (e) => {
+      downX = e.clientX;
+      downY = e.clientY;
+    });
+    dot.addEventListener("click", (e) => {
+      var _a2, _b;
+      if ((_b = (_a2 = e.target) == null ? void 0 : _a2.closest) == null ? void 0 : _b.call(_a2, ".ncp-cap-btn")) {
+        return;
+      }
+      const moved = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
+      if (moved < 4) {
+        CommonProject.scripts.render.methods.normal();
+      }
+    });
+    const CAPSULE_MAX = 232;
+    dot.addEventListener("mouseenter", () => {
+      const rect = container2.getBoundingClientRect();
+      const spaceRight = window.innerWidth - rect.right - MARGIN;
+      const spaceLeft = rect.left - MARGIN;
+      const toLeft = spaceLeft > spaceRight;
+      const room = (toLeft ? spaceLeft : spaceRight) + 44;
+      dot.classList.toggle("flip", toLeft);
+      dot.style.setProperty("--ncp-cap-w", Math.max(150, Math.min(CAPSULE_MAX, room)) + "px");
+    });
+    const modeOf = () => container2.classList.contains("minimize") ? "minimize" : container2.classList.contains("hidden") ? "hidden" : "normal";
+    let mode = modeOf();
+    let lastWidth = 820;
+    let offX = 28;
+    let offY = 23;
+    const measureNormal = () => {
+      if (modeOf() !== "normal") {
+        return;
+      }
+      const c = container2.getBoundingClientRect();
+      if (c.width) {
+        lastWidth = c.width;
+      }
+      const r = btnMin.getBoundingClientRect();
+      if (r.width && c.width) {
+        offX = c.right - (r.left + r.width / 2);
+        offY = r.top + r.height / 2 - c.top;
+      }
+    };
+    let applyingPosition = false;
+    const onModeChange = () => {
+      const next2 = modeOf();
+      if (next2 === mode || applyingPosition) {
+        return;
+      }
+      const prev = mode;
+      mode = next2;
+      applyingPosition = true;
+      try {
+        const left = container2.offsetLeft;
+        const top2 = container2.offsetTop;
+        if (prev === "normal" && next2 === "minimize") {
+          container2.style.left = left + lastWidth - offX - 22 + "px";
+          container2.style.top = top2 + offY - 22 + "px";
+        } else if (prev === "minimize" && next2 === "normal") {
+          container2.style.left = left + 22 + offX - lastWidth + "px";
+          container2.style.top = top2 + 22 - offY + "px";
+        }
+      } finally {
+        applyingPosition = false;
+      }
+      requestAnimationFrame(() => {
+        clampIntoViewport();
+        RenderScript.cfg.x = container2.offsetLeft;
+        RenderScript.cfg.y = container2.offsetTop;
+        measureNormal();
+      });
+    };
+    new MutationObserver(onModeChange).observe(container2, { attributes: true, attributeFilter: ["class"] });
+    const onLayoutChange = () => {
+      requestAnimationFrame(() => {
+        clampIntoViewport();
+        measureNormal();
+      });
+    };
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(onLayoutChange).observe(container2);
+    }
+    window.addEventListener("resize", onLayoutChange);
+    onLayoutChange();
+    const minimize = () => CommonProject.scripts.render.methods.minimize();
+    btnMin.onclick = minimize;
+    btnPause.onclick = () => {
+      toggleTaskPause();
+    };
+    capPause.onclick = (e) => {
+      e.stopPropagation();
+      toggleTaskPause();
+    };
+    btnSkip.onclick = () => {
+      sendTaskCommand("skip");
+    };
+    btnDry.onclick = () => {
+      toggleDryRun();
+      renderAll();
+    };
+    let currentPanel = "";
+    const renderNav = async () => {
+      const groups = await collectNav();
+      currentPanel = await lib.$store.getTab(lib.$const.TAB_CURRENT_PANEL_NAME) || "";
+      nav.replaceChildren();
+      for (const group of groups) {
+        if (group.title !== "总览") {
+          nav.append(el("div", "ncp-nav-group", group.title));
+        }
+        for (const item of group.items) {
+          const active = item.id === currentPanel || item.script.namespace === currentPanel;
+          const node = el(
+            "div",
+            "ncp-nav-item" + (active ? " active" : ""),
+            `${icon(item.icon, 16)}<span>${item.label}</span>`
+          );
+          node.title = item.label;
+          node.onclick = () => {
+            lib.$store.setTab(lib.$const.TAB_CURRENT_PANEL_NAME, item.id);
+          };
+          nav.append(node);
+        }
+      }
+    };
+    const header2 = container2.querySelector("header-element");
+    if (header2) {
+      let pending = false;
+      new MutationObserver(() => {
+        if (pending)
+          return;
+        pending = true;
+        setTimeout(() => {
+          pending = false;
+          renderNav();
+        }, 30);
+      }).observe(header2, { childList: true });
+    }
+    let view = buildView(getTaskState());
+    const renderTask = () => {
+      var _a2;
+      view = buildView(getTaskState());
+      const dry = isDryRun();
+      dotIcon.innerHTML = icon(view.icon, 20);
+      dotArc.setAttribute("stroke", view.color);
+      dot.classList.toggle("indeterminate", view.indeterminate);
+      const fraction = view.percent === null ? view.indeterminate ? 0.25 : 1 : view.percent / 100;
+      const full = view.status === "idle" || view.status === "paused" || view.status === "attention" || view.status === "error" || view.status === "done";
+      dotArc.setAttribute(
+        "stroke-dasharray",
+        `${((full && view.percent === null ? 1 : fraction) * circ).toFixed(1)} ${circ.toFixed(1)}`
+      );
+      badgeTl.textContent = dry ? "试" : "";
+      badgeTl.style.display = dry ? "block" : "none";
+      const isExam2 = view.kind === "exam" && view.status !== "idle" && view.status !== "done";
+      badgeBr.textContent = isExam2 ? "考" : "";
+      badgeBr.style.display = isExam2 ? "block" : "none";
+      capPct.textContent = view.percent === null ? "--" : `${view.percent}%`;
+      capText.innerHTML = `<span class="l1">${escapeHtml(view.label)}</span><span class="l2">${escapeHtml(
+        view.detail
+      )}</span>`;
+      capBar.style.width = `${(_a2 = view.percent) != null ? _a2 : 0}%`;
+      capBar.style.background = view.color;
+      capPause.innerHTML = icon(getTaskState().status === "paused" ? "play" : "pause", 12);
+      capPause.style.display = view.status === "running" || view.status === "paused" ? "inline-flex" : "none";
+      chip.dataset.status = view.status;
+      chip.innerHTML = `${icon(view.icon, 14)}<span>${view.label}${view.percent !== null && view.status !== "idle" ? ` · ${view.percent}%` : ""}</span>`;
+      taskTitle.textContent = view.title && view.status !== "idle" ? view.title : "";
+      const paused = getTaskState().status === "paused" && view.status === "paused";
+      btnPause.innerHTML = `${icon(paused ? "play" : "pause", 14)}<span>${paused ? "继续" : "暂停"}</span>`;
+      btnPause.style.display = view.status === "running" || view.status === "paused" ? "inline-flex" : "none";
+      btnSkip.style.display = view.canSkip ? "inline-flex" : "none";
+      btnDry.classList.toggle("on", dry);
+      btnDry.title = dry ? "试运行已开启：不会提交、保存或跳转（点击关闭）" : "试运行：照常答题，但不提交、不保存、不跳转";
+    };
+    const renderStatusBar = () => {
+      statusItems.replaceChildren();
+      for (const item of statusBarItems()) {
+        const node = el(
+          "span",
+          "ncp-status-item" + (item.warn ? " warn" : ""),
+          `${icon(item.icon, 13)}<span>${item.text}</span>`
+        );
+        statusItems.append(node);
+      }
+      statusRight.replaceChildren();
+      const update = getUpdateInfo();
+      if ((update == null ? void 0 : update.status) === "new") {
+        const node = el("span", "ncp-status-item update", `${icon("download", 13)}<span>新版本 ${update.last}</span>`);
+        node.onclick = () => {
+          lib.$store.setTab(lib.$const.TAB_CURRENT_PANEL_NAME, "后台-📥 更新模块");
+        };
+        statusRight.append(node);
+      }
+      const state2 = getTaskState();
+      const startedAt = state2.startedAt && state2.status !== "idle" ? state2.startedAt : sessionStart;
+      statusRight.append(
+        el(
+          "span",
+          "ncp-status-item",
+          `${icon("clock", 13)}<span>已用时 ${formatSeconds(Math.floor((Date.now() - startedAt) / 1e3))}</span>`
+        )
+      );
+    };
+    const renderAll = () => {
+      renderTask();
+      renderStatusBar();
+    };
+    onTaskStateChange(renderTask);
+    onUpdateInfoChange(renderStatusBar);
+    setInterval(() => {
+      renderTask();
+      if (container2.classList.contains("normal")) {
+        renderStatusBar();
+      }
+    }, 1e3);
+    RenderScript.onConfigChange("fontsize", () => applyFont(container2));
+    applyFont(container2);
+    const body = container2.querySelector(".body");
+    if (body) {
+      let enhancePending = false;
+      const scheduleEnhance = () => {
+        if (enhancePending)
+          return;
+        enhancePending = true;
+        setTimeout(() => {
+          enhancePending = false;
+          enhancePanel(body);
+        }, 30);
+      };
+      new MutationObserver(scheduleEnhance).observe(body, { childList: true, subtree: true });
+      scheduleEnhance();
+    }
+    renderNav();
+    renderAll();
+  }
+  function enhancePanel(body) {
+    body.querySelectorAll("script-panel-element > .separator").forEach((title) => {
+      if (title.dataset.ncp)
+        return;
+      title.dataset.ncp = "1";
+      title.textContent = stripEmoji(title.textContent || "");
+    });
+    body.querySelectorAll("config-element").forEach((cfg) => {
+      if (cfg.dataset.ncpDesc)
+        return;
+      cfg.dataset.ncpDesc = "1";
+      const provider = cfg.querySelector(
+        ".config-wrapper input, .config-wrapper textarea, .config-wrapper select"
+      );
+      const label = cfg.querySelector("label");
+      const desc = ((provider == null ? void 0 : provider.getAttribute("data-title")) || "").replace(/\s*\n\s*/g, " ").trim();
+      if (label && desc) {
+        const node = document.createElement("div");
+        node.className = "cfg-desc";
+        node.textContent = desc;
+        label.append(node);
+      }
+    });
+  }
+  function applyFont(container2) {
+    container2.style.setProperty(
+      "font-family",
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif',
+      "important"
+    );
+  }
+  function escapeHtml(text) {
+    return String(text).replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+    );
+  }
   const state$6 = {
     console: {
       listenerIds: {
@@ -7101,9 +8229,9 @@ ${content}</tr>
   };
   const RELEASE_BASE_URL = "https://raw.githubusercontent.com/ncccp1/ocs/main/release/";
   const UPDATE_CHECK_INTERVAL = 60 * 60 * 1e3;
-  function isNewerVersion(remote, local) {
+  function isNewerVersion(remote, local2) {
     const a = remote.split(".").map((n) => parseInt(n, 10) || 0);
-    const b = local.split(".").map((n) => parseInt(n, 10) || 0);
+    const b = local2.split(".").map((n) => parseInt(n, 10) || 0);
     for (let i = 0; i < Math.max(a.length, b.length); i++) {
       const diff = (a[i] || 0) - (b[i] || 0);
       if (diff !== 0) {
@@ -7152,14 +8280,40 @@ ${content}</tr>
       return scrollTop + clientHeight + 50 > scrollHeight;
     };
     const list = lib.h("div", { className: "card console" });
-    const toolbar = lib.h("div", { style: { marginBottom: "8px", textAlign: "right" } }, [
-      lib.h("button", "清空日志", (button) => {
-        button.className = "base-style-button";
-        button.onclick = () => {
-          clearPanelLogs(namespace);
-        };
-      })
-    ]);
+    const toolbarButton = (text, onClick, secondary = true) => lib.h("button", text, (button) => {
+      button.className = secondary ? "base-style-button-secondary" : "base-style-button";
+      button.style.marginLeft = "8px";
+      button.onclick = onClick;
+    });
+    const toolbar = lib.h(
+      "div",
+      { style: { marginBottom: "10px", display: "flex", justifyContent: "flex-end", flexWrap: "wrap" } },
+      [
+        lib.h(
+          "span",
+          { style: { flex: "1 1 100%", color: "#8a93a1", fontSize: "12px", marginBottom: "8px" } },
+          "复制和导出的内容已自动隐去账号、令牌和密钥"
+        ),
+        toolbarButton("复制全部", () => {
+          navigator.clipboard.writeText(formatPanelLogs(namespace, title)).then(() => lib.$message.success({ content: "已复制全部" + title, duration: 3 })).catch(() => lib.$message.error({ content: "复制失败，请改用“导出文本”" }));
+        }),
+        toolbarButton("导出文本", () => {
+          const result = exportPanelLogFile(namespace, title, "txt");
+          lib.$message.success({ content: "已导出 " + result.filename, duration: 5 });
+        }),
+        toolbarButton("导出 JSON", () => {
+          const result = exportPanelLogFile(namespace, title, "json");
+          lib.$message.success({ content: "已导出 " + result.filename, duration: 5 });
+        }),
+        toolbarButton(
+          "清空日志",
+          () => {
+            clearPanelLogs(namespace);
+          },
+          false
+        )
+      ]
+    );
     const showLogs = (logs2) => {
       if (logs2.length) {
         list.replaceChildren(...logs2.map((log) => createLog(log)));
@@ -7255,6 +8409,14 @@ ${content}</tr>
         },
         onrender({ panel }) {
           renderLogPanel(this, panel, "debugLogs", PANEL_LOG_NAMESPACES.debug, "调试日志");
+        }
+      }),
+      workbench: new lib.Script({
+        name: "工作台外壳",
+        hideInPanel: true,
+        matches: [["所有页面", /.*/]],
+        onactive() {
+          installWorkbench();
         }
       }),
       debugResponder: new lib.Script({
@@ -7557,6 +8719,7 @@ ${content}</tr>
             this.cfg.lastCheck = now2;
             const status = last === "unknown" ? "error" : isNewerVersion(last, current) ? "new" : "latest";
             lastResult = { status, last, current, checkedAt: now2 };
+            setUpdateInfo(lastResult);
             $debug.log("update", "检查更新", lastResult);
             if (!manual && status === "new" && this.cfg.autoNotify) {
               const today = Math.floor(now2 / 864e5);
@@ -7788,11 +8951,11 @@ ${content}</tr>
           panel.body.replaceChildren(
             lib.h("div", { className: "card" }, [
               status,
-              lib.h("b", "页面元素"),
+              lib.h("div", { className: "ncp-group-title" }, "页面元素"),
               row(structureBtn, fullBtn),
-              lib.h("b", "日志"),
+              lib.h("div", { className: "ncp-group-title" }, "日志"),
               row(logsBtn, clearDebugBtn),
-              lib.h("b", "其他"),
+              lib.h("div", { className: "ncp-group-title" }, "其他"),
               row(injectBtn, showTabDataBtn)
             ])
           );
@@ -7931,63 +9094,38 @@ ${content}</tr>
                 ]),
                 lib.h(
                   "div",
-                  { style: { backgroundColor: "#292929", overflow: "auto", maxHeight: window.innerHeight / 2 + "px" } },
-                  [
-                    ...list.length === 0 ? [lib.h("div", { style: { color: "white", textAlign: "center" } }, "暂无数据")] : [],
-                    ...list.map(
-                      (item) => lib.h(
-                        "div",
-                        {
-                          title: Object.entries(item).map(
-                            ([key, val]) => key === "time" ? `${key} : ${new Date(val).toLocaleString().replace(/\//g, "-")}` : `${key} : ${val}`
-                          ).join("\n"),
-                          style: {
-                            maxWidth: "800px",
-                            padding: "4px 0px",
-                            margin: "4px 0px",
-                            textWrap: "nowrap"
-                          }
-                        },
-                        [
-                          lib.h("div", [
-                            lib.h("span", { style: { marginRight: "8px" } }, new Date(item.time).toLocaleTimeString()),
-                            lib.h(
-                              "span",
-                              {
-                                style: {
-                                  backgroundColor: "#2196f3a3",
-                                  color: "#ececec",
-                                  marginRight: "8px",
-                                  padding: "0px 2px"
-                                }
-                              },
-                              item.method
-                            ),
-                            lib.h(
-                              "span",
-                              { style: { color: item.response ? "#4eb74e" : "#eb6262", marginRight: "8px" } },
-                              "●"
-                            ),
-                            lib.h(
-                              "div",
-                              { style: { display: "inline-block", color: "#ececec" } },
-                              item.url ? item.url.length > 100 ? item.url.slice(0, 100) + "..." : item.url : "-"
-                            )
-                          ]),
+                  { className: "ncp-req-list", style: { maxHeight: window.innerHeight / 2 + "px" } },
+                  list.length === 0 ? [lib.h("div", { className: "ncp-req-empty" }, "暂无数据")] : list.map(
+                    (item) => lib.h(
+                      "div",
+                      {
+                        className: "ncp-req-item",
+                        title: Object.entries(item).map(
+                          ([key, val]) => key === "time" ? `${key} : ${new Date(val).toLocaleString().replace(/\//g, "-")}` : `${key} : ${val}`
+                        ).join("\n")
+                      },
+                      [
+                        lib.h("div", { className: "ncp-req-head" }, [
+                          lib.h("span", { className: "ncp-req-time" }, new Date(item.time).toLocaleTimeString()),
+                          lib.h("span", { className: "ncp-req-method" }, item.method),
+                          lib.h("span", { className: "ncp-req-dot " + (item.response ? "ok" : "fail") }),
                           lib.h(
-                            "div",
-                            { style: { overflow: "hidden", fontSize: "12px", color: "#8f8f8f" } },
-                            item.data ? "data: " + item.data : ""
-                          ),
-                          lib.h(
-                            "div",
-                            { style: { overflow: "hidden", fontSize: "12px", color: "#8f8f8f" } },
-                            item.response ? "resp: " + item.response : item.error ? "err : " + item.error : ""
+                            "span",
+                            { className: "ncp-req-url" },
+                            item.url ? item.url.length > 100 ? item.url.slice(0, 100) + "..." : item.url : "-"
                           )
-                        ]
-                      )
+                        ]),
+                        ...item.data ? [lib.h("div", { className: "ncp-req-body" }, "data: " + item.data)] : [],
+                        ...item.response || item.error ? [
+                          lib.h(
+                            "div",
+                            { className: "ncp-req-body" },
+                            item.response ? "resp: " + item.response : "err : " + item.error
+                          )
+                        ] : []
+                      ]
                     )
-                  ]
+                  )
                 )
               ])
             );
@@ -8411,7 +9549,12 @@ ${content}</tr>
   const CORRECT_WORDS = ["对", "正确", "√", "true", "t", "是", "yes", "对的", "正确的"];
   const WRONG_WORDS = ["错", "错误", "×", "x", "false", "f", "否", "no", "错的", "错误的"];
   function normalizeText(text) {
-    return String(text || "").replace(/<[^>]+>/g, "").replace(/[\s。．.、,，;；:：!！?？"'“”（）()【】[\]]/g, "").toLowerCase();
+    let value = String(text || "");
+    try {
+      value = value.normalize("NFKC");
+    } catch {
+    }
+    return value.replace(/<[^>]+>/g, "").replace(/[\s。．.、,，;；:：!！?？"'“”（）()【】[\]]/g, "").toLowerCase();
   }
   function textSimilarity(a, b) {
     const x = normalizeText(a);
@@ -8539,6 +9682,10 @@ ${content}</tr>
   }
   function cleanQuestionStem(stem) {
     return String(stem || "").replace(/^\s*\d+\s*[.、．]\s*/, "").replace(/^\s*\d*\s*[【[(（]?\s*(?:单选题|多选题|判断题|填空题|简答题|选择题|问答题|名词解释)\s*[】\])）]\s*/, "").trim();
+  }
+  function hasValidOptionLetter(option, optionCount) {
+    const letters = String(option || "").toUpperCase().replace(/[^A-H]/g, "");
+    return optionCount >= 2 && letters.length > 0 && Array.from(letters).every((letter) => letter.charCodeAt(0) - 65 < optionCount);
   }
   function isAnswerUsableForOptions(answers, optionTexts) {
     const options = optionTexts.map(
@@ -9563,7 +10710,7 @@ ${content}</tr>
     }
     return merged.join("\n");
   }
-  async function searchAiQuestion(env, scene) {
+  async function searchAiQuestionInner(env, scene) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v;
     const config2 = getAiConfig();
     if (!config2.enable) {
@@ -9889,6 +11036,17 @@ ${searchContext}` : "",
       return createEmptySearchInfo(wrapper, stringifyError(error));
     }
   }
+  async function searchAiQuestion(env, scene) {
+    if (!getAiConfig().enable) {
+      return void 0;
+    }
+    const end = scene === "auto" ? beginBusy("ai") : void 0;
+    try {
+      return await searchAiQuestionInner(env, scene);
+    } finally {
+      end == null ? void 0 : end();
+    }
+  }
   const CREDIBLE_SIMILARITY = 0.5;
   const PLACEHOLDER_ANSWER = /^(见题干|见题目|见图|见上图|见下图|见附图|不确定|不知道|不清楚|略|无|暂无|无答案|未知)$/;
   function stripUrls(text) {
@@ -9921,6 +11079,12 @@ ${searchContext}` : "",
       return false;
     }
     const optionTexts = mergeOptionLabelLines(String(optionsText || "")).split("\n").map((line) => line.trim()).filter(Boolean);
+    if (credible.some((result) => {
+      var _a;
+      return hasValidOptionLetter((_a = result.extra_data) == null ? void 0 : _a.option, optionTexts.length);
+    })) {
+      return true;
+    }
     return isAnswerUsableForOptions(
       credible.map((result) => result.answer),
       optionTexts
@@ -9954,9 +11118,13 @@ ${searchContext}` : "",
     }
   }
   async function searchAnswerInWrappers(wrappers, env, scene = "auto") {
-    const infos = await Promise.all(
-      wrappers.map((wrapper) => searchWrapperWithDeadline(wrapper, env, scene))
-    );
+    const endBusy = scene === "auto" ? beginBusy("search") : void 0;
+    let infos;
+    try {
+      infos = await Promise.all(wrappers.map((wrapper) => searchWrapperWithDeadline(wrapper, env, scene)));
+    } finally {
+      endBusy == null ? void 0 : endBusy();
+    }
     const credible = hasCredibleResult(String(env.title || ""), infos, String(env.options || ""));
     $debug.log("answerer", credible ? "题库已有可信结果" : "题库没有可信结果，尝试 AI 兜底", {
       title: String(env.title || "").slice(0, 40),
@@ -10039,6 +11207,10 @@ ${searchContext}` : "",
     }
     pausedWorkers.set(worker, paused);
     (_a = worker.emit) == null ? void 0 : _a.call(worker, paused ? "stop" : "continuate");
+    const state2 = getTaskState();
+    if (state2.status === "running" || state2.status === "paused") {
+      setTaskState({ status: paused ? "paused" : "running" });
+    }
     pauseListeners.forEach((listener) => listener(worker, paused));
   }
   const floatingBtnStyle = {
@@ -10055,7 +11227,7 @@ ${searchContext}` : "",
     if (globalFloatingBar)
       globalFloatingBar.remove();
     (_a = getFloatingBarHost().getElementById(FLOATING_BAR_ID)) == null ? void 0 : _a.remove();
-    const pauseBtn = lib.h("button", { style: { ...floatingBtnStyle, background: "#7c4dff" } }, "⏸ 暂停");
+    const pauseBtn = lib.h("button", { style: { ...floatingBtnStyle, background: "#1890ff" } }, "⏸ 暂停");
     pauseBtn.onclick = () => {
       onStartPause();
       pauseBtn.textContent = getState() ? "▶ 继续" : "⏸ 暂停";
@@ -10066,10 +11238,10 @@ ${searchContext}` : "",
         flex: "1",
         minWidth: "120px",
         padding: "4px 8px",
-        border: "1px solid #555",
-        borderRadius: "12px",
-        background: "#222",
-        color: "#eee",
+        border: "1px solid #4b5563",
+        borderRadius: "14px",
+        background: "#1f2937",
+        color: "#f3f4f6",
         fontSize: "12px",
         outline: "none"
       }
@@ -10083,17 +11255,17 @@ ${searchContext}` : "",
         width: "460px",
         maxHeight: "400px",
         overflowY: "auto",
-        background: "#1a1a2e",
-        border: "1px solid #444",
-        borderRadius: "10px",
+        background: "#111827",
+        border: "1px solid #374151",
+        borderRadius: "12px",
         padding: "10px",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+        boxShadow: "0 12px 32px rgba(0,0,0,0.45)",
         fontSize: "13px",
         color: "#e0e0e0",
         zIndex: "999999"
       }
     });
-    const searchBtn = lib.h("button", { style: { ...floatingBtnStyle, background: "#00bfa5" } }, "搜索");
+    const searchBtn = lib.h("button", { style: { ...floatingBtnStyle, background: "#2fb36d" } }, "搜索");
     searchBtn.onclick = async () => {
       const value = searchInput.value.trim();
       if (!value)
@@ -10180,8 +11352,8 @@ ${searchContext}` : "",
       ""
     );
     const applyCollapsed = (collapsed2) => {
-      [searchInput, searchBtn].forEach((el) => {
-        el.style.display = collapsed2 ? "none" : "";
+      [searchInput, searchBtn].forEach((el2) => {
+        el2.style.display = collapsed2 ? "none" : "";
       });
       if (collapsed2) {
         searchResultBox.style.display = "none";
@@ -10203,6 +11375,11 @@ ${searchContext}` : "",
       }
       applyCollapsed(collapsed);
     };
+    const statusLabel = lib.h(
+      "span",
+      { style: { color: "#9ca3af", fontSize: "11px", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" } },
+      ""
+    );
     const bar = lib.h(
       "div",
       {
@@ -10215,16 +11392,18 @@ ${searchContext}` : "",
           display: "flex",
           gap: "6px",
           padding: "6px 12px",
-          background: "rgba(0,0,0,0.82)",
-          borderRadius: "24px",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+          background: "rgba(17,24,39,0.94)",
+          borderRadius: "22px",
+          boxShadow: "0 8px 28px rgba(0,0,0,0.35)",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif",
           alignItems: "center",
           flexWrap: "wrap",
           maxWidth: "480px"
         }
       },
       [
-        lib.h("span", { style: { color: "#aaa", fontSize: "11px", marginRight: "2px", fontWeight: "bold" } }, "南城派"),
+        lib.h("span", { style: { color: "#e5e7eb", fontSize: "12px", fontWeight: "600" } }, "南城派"),
+        statusLabel,
         pauseBtn,
         collapseBtn,
         searchInput,
@@ -10236,7 +11415,7 @@ ${searchContext}` : "",
     globalFloatingBar = bar;
     const host = getFloatingBarHost();
     (host.body || document.body).appendChild(bar);
-    return { bar, btn: pauseBtn };
+    return { bar, btn: pauseBtn, statusLabel };
   }
   function attachWorkFloatingBar(worker) {
     if (!worker) {
@@ -10253,7 +11432,30 @@ ${searchContext}` : "",
       }
     };
     pauseListeners.add(listener);
+    const stopCommand = onTaskCommand((command) => {
+      if (command === "pause") {
+        setWorkPaused(worker, true);
+      } else if (command === "resume") {
+        setWorkPaused(worker, false);
+      }
+    });
+    const updateLabel = () => {
+      const state2 = getTaskState();
+      const running = state2.status === "running" || state2.status === "paused" || state2.status === "attention";
+      const parts = [];
+      if (running) {
+        parts.push(TASK_KIND_LABEL[state2.kind] || "");
+        if ((state2.total || 0) > 0) {
+          parts.push(`${Math.min(state2.current || 0, state2.total || 0)}/${state2.total}`);
+        }
+      }
+      control.statusLabel.textContent = parts.filter(Boolean).join(" · ");
+    };
+    const stopState = onTaskStateChange(updateLabel);
+    updateLabel();
     const remove = () => {
+      stopCommand();
+      stopState();
       pauseListeners.delete(listener);
       control.bar.remove();
       if (globalFloatingBar === control.bar) {
@@ -10589,8 +11791,8 @@ ${searchContext}` : "",
         };
       }
     }
-    for (const el of elements2) {
-      hackSelect(el);
+    for (const el2 of elements2) {
+      hackSelect(el2);
     }
   }
   let popupWin;
@@ -10662,11 +11864,11 @@ ${searchContext}` : "",
     labelClassName: "checkbox-label",
     providerClassName: "checkbox-input",
     enableForAttribute: true,
-    onload(el) {
+    onload(el2) {
       const checked = this.checked;
-      el.classList.toggle("checked", checked);
+      el2.classList.toggle("checked", checked);
       this.addEventListener("change", () => {
-        el.classList.toggle("checked", this.checked);
+        el2.classList.toggle("checked", this.checked);
       });
     }
   };
@@ -10701,8 +11903,8 @@ ${searchContext}` : "",
     }
     let isBlock = false;
     if (node.nodeType === Node.ELEMENT_NODE) {
-      const el = node;
-      const tag = el.tagName;
+      const el2 = node;
+      const tag = el2.tagName;
       if (tag === "SCRIPT" || tag === "STYLE") {
         return;
       }
@@ -10711,7 +11913,7 @@ ${searchContext}` : "",
         return;
       }
       if (tag === "IMG") {
-        const src2 = el.getAttribute("src") || el.getAttribute("data-src") || "";
+        const src2 = el2.getAttribute("src") || el2.getAttribute("data-src") || "";
         if (src2 && !src2.startsWith("data:")) {
           try {
             out.push(` ${new URL(src2, baseURI).href} `);
@@ -10744,6 +11946,193 @@ ${searchContext}` : "",
     text = text.replace(/(https?:\/\/\S+)(?:\s+\1)+/g, "$1");
     return text || selection.toString().trim();
   }
+  const KIND_ICON = {
+    video: "play",
+    audio: "headphones",
+    document: "file",
+    quiz: "pencil",
+    homework: "notebook",
+    exam: "clipboard",
+    other: "school"
+  };
+  function esc(text) {
+    return String(text != null ? text : "").replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+    );
+  }
+  function fmt(total) {
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  }
+  function goto(panelName) {
+    lib.$store.setTab(lib.$const.TAB_CURRENT_PANEL_NAME, panelName);
+  }
+  const LOG_TYPE_LABEL = {
+    info: "信息",
+    warn: "警告",
+    error: "错误",
+    debug: "调试",
+    log: "日志"
+  };
+  function renderLogs() {
+    const logs = getPanelLogs(PANEL_LOG_NAMESPACES.system).slice(-8).reverse();
+    if (!logs.length) {
+      return '<div class="ov-empty">暂无日志</div>';
+    }
+    return logs.map((log) => {
+      const d = new Date(log.time);
+      const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      return `<div class="ov-log"><span class="t">${time}</span><span class="lv ${log.type}">${LOG_TYPE_LABEL[log.type] || log.type}</span><span class="c">${esc(log.content)}</span></div>`;
+    }).join("");
+  }
+  function renderTaskCard(state2, stale) {
+    var _a, _b;
+    const status = stale ? "idle" : state2.status;
+    const dry = isDryRun();
+    if (status === "idle") {
+      return `
+			<div class="ov-card">
+				<div class="ov-head"><span class="ov-chip" data-status="idle">${icon("moon", 14)}待机</span></div>
+				<div class="ov-title">${stale ? "页面已离开或没有响应" : "当前没有进行中的任务"}</div>
+				<div class="ov-sub">打开课程学习、作业或考试页面后，脚本会自动开始，这里会实时显示进度。</div>
+				<div class="ov-actions">
+					<button class="ncp-btn" data-go="通用-⚙️ 全局设置">${icon("sliders", 14)}<span>全局设置</span></button>
+					<button class="ncp-btn" data-go="通用-🏠 使用教程">${icon("book", 14)}<span>使用教程</span></button>
+					<button class="ncp-btn${dry ? " on" : ""}" data-act="dry">${icon("flask", 14)}<span>试运行</span></button>
+				</div>
+			</div>`;
+    }
+    const percent = state2.progress === null || state2.progress === void 0 ? null : Math.round(state2.progress * 100);
+    const isQuestionTask = state2.kind === "quiz" || state2.kind === "homework" || state2.kind === "exam";
+    const busyChip = state2.busy === "ai" ? `<span class="ov-chip" data-status="busy">${icon("sparkles", 13)}AI 思考中</span>` : state2.busy === "search" ? `<span class="ov-chip" data-status="busy">${icon("search", 13)}搜题中</span>` : state2.busy === "captcha" ? `<span class="ov-chip" data-status="attention">${icon("shield", 13)}等待你处理</span>` : "";
+    const sub = state2.message || (isQuestionTask ? `已处理 ${(_a = state2.current) != null ? _a : 0} / ${(_b = state2.total) != null ? _b : 0} 题` : state2.remainingSeconds !== void 0 ? `剩余 ${fmt(state2.remainingSeconds)}` : "");
+    return `
+		<div class="ov-card">
+			<div class="ov-head">
+				<span class="ov-chip" data-status="${status}">${icon(KIND_ICON[state2.kind], 14)}${TASK_KIND_LABEL[state2.kind]}</span>
+				<span class="ov-chip soft" data-status="${status}">${TASK_STATUS_LABEL[status]}</span>
+				${busyChip}
+				<span class="ov-spacer"></span>
+				${state2.platform ? `<span class="ov-mute">${esc(state2.platform)}</span>` : ""}
+			</div>
+			<div class="ov-title">${esc(state2.title || TASK_KIND_LABEL[state2.kind])}</div>
+			<div class="ov-progress"><i style="width:${percent != null ? percent : 0}%"></i></div>
+			<div class="ov-row"><span>${percent === null ? "进度未知" : percent + "%"}</span><span>${esc(sub)}</span></div>
+			<div class="ov-actions">
+				${status === "running" || status === "paused" ? `<button class="ncp-btn primary" data-act="pause">${icon(
+      status === "paused" ? "play" : "pause",
+      14
+    )}<span>${status === "paused" ? "继续" : "暂停"}</span></button>` : ""}
+				${state2.canSkip && (status === "running" || status === "paused") ? `<button class="ncp-btn" data-act="skip">${icon("skip", 14)}<span>跳过</span></button>` : ""}
+				<button class="ncp-btn${dry ? " on" : ""}" data-act="dry">${icon("flask", 14)}<span>试运行${dry ? "：开" : ""}</span></button>
+			</div>
+		</div>`;
+  }
+  function renderQuestions(state2) {
+    var _a;
+    if (!((_a = state2.questions) == null ? void 0 : _a.length)) {
+      return "";
+    }
+    const cells = state2.questions.map((mark, index) => `<span class="ov-q ${mark}" title="第 ${index + 1} 题">${index + 1}</span>`).join("");
+    return `
+		<div class="ov-card">
+			<div class="ov-sec-title">题目进度</div>
+			<div class="ov-qs">${cells}</div>
+			<div class="ov-legend"><span class="ok">已答</span><span class="cur">当前</span><span class="pending">未答</span><span class="miss">未命中</span></div>
+		</div>`;
+  }
+  function renderSteps(state2) {
+    const steps = state2.steps || [];
+    if (!steps.length) {
+      return "";
+    }
+    const done = steps.filter((s) => s.status === "done" || s.status === "skipped").length;
+    const rows = steps.map((step) => {
+      const mark = step.status === "done" ? icon("check", 13) : step.status === "running" ? icon("loader", 13) : step.status === "error" ? icon("alert", 13) : step.status === "skipped" ? icon("minus", 13) : icon("clock", 13);
+      const note = step.note || { done: "已完成", running: "进行中", pending: "等待", skipped: "已跳过", error: "出错" }[step.status];
+      return `<div class="ov-step ${step.status}"><span class="m">${mark}</span><span class="k">${icon(
+        KIND_ICON[step.kind],
+        15
+      )}</span><span class="n">${esc(step.title)}</span><span class="s">${esc(note)}</span></div>`;
+    }).join("");
+    return `
+		<div class="ov-card">
+			<div class="ov-sec-title">本页任务点 <span class="ov-mute">${done}/${steps.length}</span></div>
+			${rows}
+		</div>`;
+  }
+  function renderSources(state2) {
+    const sources = state2.sources;
+    if (!sources || sources.cache + sources.bank + sources.ai === 0) {
+      return "";
+    }
+    return `
+		<div class="ov-card">
+			<div class="ov-sec-title">答案来源</div>
+			<div class="ov-chips">
+				<span class="ov-chip" data-status="done">缓存命中 ${sources.cache}</span>
+				<span class="ov-chip">题库 ${sources.bank}</span>
+				<span class="ov-chip" data-status="busy">AI ${sources.ai}</span>
+			</div>
+		</div>`;
+  }
+  function renderOverview(panel) {
+    const root2 = document.createElement("div");
+    root2.className = "ov-root";
+    panel.body.replaceChildren(root2);
+    const draw = () => {
+      const state2 = getTaskState();
+      const stale = isTaskStale(state2);
+      const showDetail = !stale && state2.status !== "idle";
+      root2.innerHTML = `
+			<div class="ov-grid">
+				<div class="ov-col">
+					${renderTaskCard(state2, stale)}
+					${showDetail ? renderQuestions(state2) : ""}
+					${showDetail ? renderSteps(state2) : ""}
+				</div>
+				<div class="ov-col">
+					${showDetail ? renderSources(state2) : ""}
+					<div class="ov-card">
+						<div class="ov-sec-title">实时日志
+							<button class="ov-link" data-go="后台-📄 日志输出">查看全部</button>
+						</div>
+						${renderLogs()}
+					</div>
+				</div>
+			</div>`;
+    };
+    root2.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-act],[data-go]");
+      if (!target) {
+        return;
+      }
+      const go = target.dataset.go;
+      if (go) {
+        goto(go);
+        return;
+      }
+      const act = target.dataset.act;
+      if (act === "pause") {
+        toggleTaskPause();
+      } else if (act === "skip") {
+        sendTaskCommand("skip");
+      } else if (act === "dry") {
+        toggleDryRun();
+        draw();
+      }
+    });
+    draw();
+    const off = onTaskStateChange(draw);
+    const timer = setInterval(() => {
+      if (!root2.isConnected) {
+        clearInterval(timer);
+        off();
+        return;
+      }
+      draw();
+    }, 2e3);
+  }
   const TAB_WORK_RESULTS_KEY = "common.work-results.results";
   const PROJECT_NAME = "南城派网课助手";
   const PROJECT_REPO = "https://github.com/ncccp1/ocs";
@@ -10758,10 +12147,10 @@ ${searchContext}` : "",
       questionPositionSyncHandler: {
         cx: (index) => {
           var _a;
-          const el = (_a = document.querySelectorAll('[id*="sigleQuestionDiv"], .questionLi')) == null ? void 0 : _a.item(index);
-          if (el) {
+          const el2 = (_a = document.querySelectorAll('[id*="sigleQuestionDiv"], .questionLi')) == null ? void 0 : _a.item(index);
+          if (el2) {
             window.scrollTo({
-              top: el.getBoundingClientRect().top + window.pageYOffset - 50,
+              top: el2.getBoundingClientRect().top + window.pageYOffset - 50,
               behavior: "smooth"
             });
           }
@@ -11384,25 +12773,25 @@ ${searchContext}` : "",
     name: "通用",
     domains: [],
     scripts: {
+      overview: new lib.Script({
+        name: "📊 总览",
+        namespace: "common.overview",
+        matches: [["所有页面", /.*/]],
+        onrender({ panel }) {
+          renderOverview(panel);
+        }
+      }),
       guide: new lib.Script({
         name: "🏠 使用教程",
         matches: [["所有页面", /.*/]],
         namespace: "common.guide",
         configs: {
           notes: {
-            defaultValue: lib.$ui.notes([
-              "打开任意网课平台，进入视频、作业页面等待脚本运行，",
-              "如遇问题请通过项目主页或问题反馈页面提交截图说明。",
-              "温馨提示: ",
-              "⚠️ 禁止与其他脚本一起使用，否则会不兼容导致无法运行！",
-              "⚠️ 禁止最小化浏览器、切屏，否则可能导致脚本无法运行！"
-            ]).outerHTML
+            defaultValue: ""
           }
         },
         onrender({ panel }) {
-          const guide = createGuide();
-          guide.style.width = "480px";
-          panel.body.replaceChildren(guide);
+          panel.body.replaceChildren(createGuide());
         }
       }),
       settings: new lib.Script({
@@ -11712,6 +13101,7 @@ ${searchContext}` : "",
             }
           },
           metoServer: {
+            separator: "MeTo 题库",
             label: "MeTo 服务地址",
             defaultValue: "https://m.metst.cn",
             attrs: {
@@ -11779,6 +13169,7 @@ ${searchContext}` : "",
             }
           },
           aiEnable: {
+            separator: "AI 兜底答题",
             label: "AI 兜底答题",
             defaultValue: false,
             attrs: {
@@ -11861,6 +13252,7 @@ ${searchContext}` : "",
             }
           },
           upload: {
+            separator: "答题方式",
             label: "答题完成后",
             tag: "select",
             defaultValue: 80,
@@ -11914,10 +13306,10 @@ ${searchContext}` : "",
             tag: "textarea",
             showIf: "common.settings.randomWork-complete",
             attrs: { title: "每行一个，随机填入", style: { minWidth: "200px", minHeight: "50px" } },
-            onload(el) {
-              el.addEventListener("change", () => {
-                if (String(el.value).trim() === "") {
-                  el.value = el.defaultValue;
+            onload(el2) {
+              el2.addEventListener("change", () => {
+                if (String(el2.value).trim() === "") {
+                  el2.value = el2.defaultValue;
                 }
               });
             }
@@ -11992,10 +13384,10 @@ ${searchContext}` : "",
               title: "分隔答案的符号，例如：答案1#答案2#答案3，分隔符为 #， 使用英文逗号进行隔开 : ',' "
             },
             defaultValue: ["===", "#", "---", "###", "|", ";", "；"].join(","),
-            onload(el) {
-              el.addEventListener("change", () => {
-                if (String(el.value).trim() === "") {
-                  el.value = el.defaultValue;
+            onload(el2) {
+              el2.addEventListener("change", () => {
+                if (String(el2.value).trim() === "") {
+                  el2.value = el2.defaultValue;
                 }
               });
             }
@@ -12041,10 +13433,10 @@ ${searchContext}` : "",
               title: "在搜题的时候自动删除多余的文字，以便提高搜题的准确度，每行一个。",
               style: { minWidth: "200px", minHeight: "50px" }
             },
-            onload(el) {
-              el.addEventListener("change", () => {
-                if (String(el.value).trim() === "") {
-                  el.value = el.defaultValue;
+            onload(el2) {
+              el2.addEventListener("change", () => {
+                if (String(el2.value).trim() === "") {
+                  el2.value = el2.defaultValue;
                 }
               });
             }
@@ -12342,7 +13734,7 @@ ${searchContext}` : "",
             },
             createWorkResultsPanel: (mount2) => {
               const root2 = mount2 || lib.h("div");
-              root2.style.width = "400px";
+              root2.style.width = mount2 ? "100%" : "400px";
               const container2 = lib.h("div");
               root2.replaceChildren(createManualSearchEntry(), container2);
               let scrollPercent = 0;
@@ -12565,7 +13957,7 @@ ${searchContext}` : "",
           };
         },
         onrender({ panel }) {
-          panel.body.replaceChildren(this.methods.createWorkResultsPanel());
+          panel.body.replaceChildren(this.methods.createWorkResultsPanel(lib.h("div")));
         }
       }),
       onlineSearch: new lib.Script({
@@ -12779,7 +14171,7 @@ ${searchContext}` : "",
               if (sameScopeCaches.length) {
                 caches = sameScopeCaches;
               }
-              if (caches.length && !isAnswerUsableForOptions(
+              if (caches.length && !caches.some((c) => hasValidOptionLetter(c.option, optionTexts.length)) && !isAnswerUsableForOptions(
                 caches.map((c) => c.answer),
                 optionTexts
               )) {
@@ -13161,25 +14553,30 @@ ${searchContext}` : "",
               }
             )
           );
-          [cachesBtn, exportSetting, importSetting].forEach((btn) => {
-            btn.onmouseover = () => {
-              btn.style.boxShadow = "0px 0px 4px #0099ff9c";
-            };
-            btn.onmouseout = () => {
-              btn.style.boxShadow = "0px 0px 4px #bebebe";
-            };
-          });
-          const sep = (text) => lib.h("div", { className: "separator", style: { padding: "4px 0px" } }, text);
+          const action = (el2, iconName, title, desc) => {
+            el2.removeAttribute("style");
+            el2.onmouseover = null;
+            el2.onmouseout = null;
+            el2.className = "ncp-action";
+            el2.innerHTML = `<span class="ncp-action-icon">${icon(iconName, 18)}</span><span class="ncp-action-text"><b>${title}</b><small>${desc}</small></span><span class="ncp-action-go">${icon("chevron", 16)}</span>`;
+            return el2;
+          };
+          const group = (text) => lib.h("div", { className: "ncp-group-title" }, text);
           panel.body.replaceChildren(
-            lib.h("div", [
-              sep("题库拓展"),
-              cachesBtn,
-              sep("设置备份与迁移"),
-              exportSetting,
-              importSetting,
+            lib.h("div", { className: "ncp-actions" }, [
+              group("题库"),
+              action(cachesBtn, "database", "题库缓存", "查看、搜索、导出和导入长期保存的题库答案"),
+              group("设置备份与迁移"),
+              action(
+                exportSetting,
+                "download",
+                "导出设置",
+                "把全局设置、题库配置、学习设置保存为文件，可选择是否包含题库缓存和密钥"
+              ),
+              action(importSetting, "upload", "导入设置", "从设置文件恢复，导入前会显示内容概要并让你确认"),
               lib.h(
                 "div",
-                { style: { fontSize: "12px", opacity: "0.75", padding: "4px 8px", lineHeight: "1.6" } },
+                { className: "ncp-hint" },
                 "换电脑、换浏览器、重装脚本或升级前先“导出设置”，在新版本里“导入设置”即可恢复；脚本自动更新不会丢失设置。"
               )
             ])
@@ -13312,44 +14709,65 @@ ${searchContext}` : "",
         ])
       });
     };
-    const gotoHome = lib.h("button", { className: "base-style-button-secondary" }, "🏡项目主页");
-    gotoHome.onclick = () => window.open(PROJECT_REPO, "_blank");
-    const contactUs = lib.h("button", { className: "base-style-button-secondary" }, "🗨️问题反馈");
-    contactUs.onclick = () => window.open(PROJECT_ISSUES, "_blank");
-    const changeLog = lib.h("button", { className: "base-style-button-secondary" }, "📄更新日志");
-    changeLog.onclick = () => CommonProject.scripts.apps.methods.showChangelog();
-    const cardStyle = {
-      border: "1px solid #eee",
-      borderRadius: "4px",
-      padding: "8px",
-      paddingTop: "4px"
+    const link = (text, onClick, primary = false) => {
+      const btn = lib.h("button", { className: primary ? "base-style-button" : "base-style-button-secondary" }, text);
+      btn.onclick = onClick;
+      return btn;
     };
-    return lib.h("div", { className: "user-guide" }, [
-      lib.h("div", { className: "notes card", style: { ...cardStyle, marginBottom: "12px" } }, [
-        `${PROJECT_NAME} 基于 OCSJS 二次开发，如需查看说明或反馈问题，请使用下方快捷入口。`
+    const step = (index, title, desc, action) => lib.h("div", { className: "gd-step" }, [
+      lib.h("span", { className: "gd-step-n" }, String(index)),
+      lib.h("div", { className: "gd-step-body" }, [lib.h("b", title), lib.h("div", { className: "gd-step-desc" }, desc)]),
+      action || ""
+    ]);
+    return lib.h("div", { className: "user-guide gd" }, [
+      lib.h("div", { className: "gd-hero" }, [
+        lib.h("div", { className: "gd-hero-title" }, `欢迎使用${PROJECT_NAME}`),
+        lib.h("div", { className: "gd-hero-sub" }, "基于 OCSJS 二次开发，自动完成网课的视频学习、章节测验、作业与考试。")
       ]),
-      lib.h("div", { style: cardStyle }, [
-        lib.h("div", { style: { marginBottom: "4px", fontWeight: "bold" } }, [
-          "✨兼容的网课平台：",
-          lib.h("span", { className: "secondary", style: { fontWeight: "normal" } }, "（未适配的平台将无法运行，请等待适配）")
-        ]),
-        lib.h("div", [
-          ...[CXProject, ZHSProject, ZJYProject, IcveMoocProject, ICourseProject].map((project2) => {
-            const btn = lib.h("button", { className: "base-style-button-secondary", style: { margin: "4px" } }, [
-              project2.name
-            ]);
-            btn.onclick = () => {
-              showProjectDetails(project2);
-            };
-            return btn;
-          })
-        ])
+      lib.h("div", { className: "gd-section" }, "三步开始"),
+      lib.h("div", { className: "gd-steps" }, [
+        step(
+          1,
+          "配置题库",
+          "在“全局设置”里填写题库（推荐 MeTo），或者开启 AI 兜底答题。没有题库也可以只刷视频。",
+          link("去设置", () => CommonProject.scripts.render.methods.pin(CommonProject.scripts.settings), true)
+        ),
+        step(2, "打开网课页面", "进入课程学习、章节测验、作业或考试页面，脚本会自动运行，不需要额外操作。"),
+        step(
+          3,
+          "在总览里查看进度",
+          "随时可以暂停、跳过或试运行；窗口收起后只剩一个小圆点，悬停即可看到进度。",
+          link("打开总览", () => CommonProject.scripts.render.methods.pin(CommonProject.scripts.overview))
+        )
       ]),
-      lib.h("div", { style: { ...cardStyle, marginTop: "12px" } }, [
-        lib.h("div", { style: { marginBottom: "8px", fontWeight: "bold" } }, "🌐快捷访问："),
-        gotoHome,
-        contactUs,
-        changeLog
+      lib.h("div", { className: "gd-section" }, [
+        "已适配的平台",
+        lib.h("span", { className: "gd-section-sub" }, "点击查看每个平台的脚本和运行页面")
+      ]),
+      lib.h(
+        "div",
+        { className: "gd-platforms" },
+        [CXProject, ZHSProject, ZJYProject, IcveMoocProject, ICourseProject].map((project2) => {
+          const btn = lib.h("button", { className: "gd-platform" }, project2.name);
+          btn.onclick = () => showProjectDetails(project2);
+          return btn;
+        })
+      ),
+      lib.h("div", { className: "gd-section" }, "使用前请注意"),
+      lib.h("div", { className: "gd-tips" }, [
+        lib.h("div", { className: "gd-tip" }, "禁止与其他网课脚本一起使用，否则会因为不兼容而无法运行。"),
+        lib.h(
+          "div",
+          { className: "gd-tip" },
+          "请不要最小化浏览器或者切换到其他标签页，否则视频可能会暂停、脚本可能停止运行。"
+        ),
+        lib.h("div", { className: "gd-tip" }, "遇到验证码或人脸识别时，需要你手动完成，脚本会自动等待。")
+      ]),
+      lib.h("div", { className: "gd-section" }, "更多"),
+      lib.h("div", { className: "gd-links" }, [
+        link("项目主页", () => window.open(PROJECT_REPO, "_blank")),
+        link("问题反馈", () => window.open(PROJECT_ISSUES, "_blank")),
+        link("更新日志", () => CommonProject.scripts.apps.methods.showChangelog())
       ])
     ]);
   };
@@ -13379,11 +14797,11 @@ ${searchContext}` : "",
     return new Promise((resolve, reject) => {
       let timeout;
       const interval = setInterval(() => {
-        const el = typeof selector === "function" ? selector() : document.querySelector(selector);
-        if (el) {
+        const el2 = typeof selector === "function" ? selector() : document.querySelector(selector);
+        if (el2) {
           clearInterval(interval);
           timeout && clearTimeout(timeout);
-          resolve(el);
+          resolve(el2);
         }
       }, (opts == null ? void 0 : opts.check_period_ms) || 1e3);
       if (opts == null ? void 0 : opts.timeout_seconds) {
@@ -13449,7 +14867,7 @@ ${searchContext}` : "",
     getNext(opts) {
       let videoItems = Array.from(document.querySelectorAll(".clearfix.video"));
       if (!opts.restudy) {
-        videoItems = videoItems.filter((el) => el.querySelector(".time_icofinish") === null);
+        videoItems = videoItems.filter((el2) => el2.querySelector(".time_icofinish") === null);
       }
       for (let i = 0; i < videoItems.length; i++) {
         const item = videoItems[i];
@@ -13482,12 +14900,12 @@ ${searchContext}` : "",
         controlsBar.style.display = "block";
         dl.style.display = "block";
         const selector = `.definiLines .${definition2}:not(.active)`;
-        const el = document.querySelector(selector);
-        if (el) {
+        const el2 = document.querySelector(selector);
+        if (el2) {
           if (this.remotePage) {
             await this.remotePage.click(selector);
           } else {
-            el.click();
+            el2.click();
           }
         }
       }
@@ -13583,24 +15001,24 @@ ${searchContext}` : "",
           return next_card;
         }
       }
-      let videoItems = Array.from(document.querySelectorAll(".clearfix.video")).filter((el) => {
+      let videoItems = Array.from(document.querySelectorAll(".clearfix.video")).filter((el2) => {
         if (is_resource_box_mode) {
-          return !!el.querySelector(".resource-box");
+          return !!el2.querySelector(".resource-box");
         }
         return true;
       });
       console.log(videoItems);
       if (!opts.restudy) {
         if (is_resource_box_mode) {
-          videoItems = videoItems.filter((el) => {
+          videoItems = videoItems.filter((el2) => {
             var _a;
-            const text = ((_a = el.querySelector(".resource-text")) == null ? void 0 : _a.textContent) || "";
+            const text = ((_a = el2.querySelector(".resource-text")) == null ? void 0 : _a.textContent) || "";
             const [progress, total] = text.replace("必学", "").trim().split("/").map((s) => parseInt(s));
             return progress < total;
           });
         } else {
-          videoItems = videoItems.filter((el) => {
-            const num_el = el.querySelector(".progress-num");
+          videoItems = videoItems.filter((el2) => {
+            const num_el = el2.querySelector(".progress-num");
             return num_el === null || num_el.textContent !== "100%";
           });
         }
@@ -13635,12 +15053,12 @@ ${searchContext}` : "",
     }
     getNext(opts) {
       let videoItems = Array.from(document.querySelectorAll(".child-main")).filter(
-        (el) => el.querySelector(".child-time")
+        (el2) => el2.querySelector(".child-time")
       );
       console.log(videoItems);
       if (!opts.restudy) {
-        videoItems = videoItems.filter((el) => {
-          if (el.querySelector(".child-check")) {
+        videoItems = videoItems.filter((el2) => {
+          if (el2.querySelector(".child-check")) {
             return false;
           }
           return true;
@@ -13711,18 +15129,18 @@ ${searchContext}` : "",
     }
     getNext(opts) {
       let jobs = Array.from(document.querySelectorAll(".chapter-content .chapter-item"));
-      jobs = jobs.map((el) => {
-        const children = el.querySelectorAll(".chapter-content-second");
+      jobs = jobs.map((el2) => {
+        const children = el2.querySelectorAll(".chapter-content-second");
         if (children.length > 0) {
           return Array.from(children);
         } else {
-          return [el];
+          return [el2];
         }
       }).flat();
       console.log(jobs);
       if (!opts.restudy) {
-        jobs = jobs.filter((el) => {
-          if (el.querySelector(".finish-icon")) {
+        jobs = jobs.filter((el2) => {
+          if (el2.querySelector(".finish-icon")) {
             return false;
           }
           return true;
@@ -13797,15 +15215,15 @@ ${searchContext}` : "",
     }
     getNext(opts) {
       let jobs = Array.from(document.querySelectorAll(".source-icon")).map(
-        (el) => {
+        (el2) => {
           var _a;
-          return (_a = el.parentElement) == null ? void 0 : _a.parentElement;
+          return (_a = el2.parentElement) == null ? void 0 : _a.parentElement;
         }
       );
       console.log(jobs);
       if (!opts.restudy) {
-        jobs = jobs.filter((el) => {
-          if (el.querySelector("i.select")) {
+        jobs = jobs.filter((el2) => {
+          if (el2.querySelector("i.select")) {
             return false;
           }
           return true;
@@ -14352,7 +15770,7 @@ ${searchContext}` : "",
                   const nextJob = getNextJob();
                   if (nextJob) {
                     const nextJobTitle = nextJob.querySelector(".common-text");
-                    document.querySelectorAll('[class*="card-container"].active').forEach((el) => el.classList.remove("active"));
+                    document.querySelectorAll('[class*="card-container"].active').forEach((el2) => el2.classList.remove("active"));
                     if (include_jobs.some((job) => {
                       var _a2;
                       return (_a2 = nextJob.querySelector(".icon-box")) == null ? void 0 : _a2.classList.contains(job);
@@ -14420,6 +15838,12 @@ ${searchContext}` : "",
                 if (!video) {
                   return;
                 }
+                attachMediaToTask(video, {
+                  platform: "知到智慧树",
+                  onSkip: () => {
+                    next2();
+                  }
+                });
                 playMedia(() => video == null ? void 0 : video.play()).then(() => {
                   lib.$store.setTab("reload-count", 0);
                   const cn = getChapterName();
@@ -14711,9 +16135,9 @@ ${searchContext}` : "",
           };
           const hasStudyTimeWarnDialog = () => {
             return !!Array.from(document.querySelectorAll(".el-overlay .content")).find(
-              (el) => {
+              (el2) => {
                 var _a;
-                return (_a = el.textContent) == null ? void 0 : _a.includes("保持良好的学习习惯");
+                return (_a = el2.textContent) == null ? void 0 : _a.includes("保持良好的学习习惯");
               }
             );
           };
@@ -14722,9 +16146,9 @@ ${searchContext}` : "",
               const interval = setInterval(() => {
                 var _a;
                 const dialog = Array.from(document.querySelectorAll(".el-overlay")).find(
-                  (el) => {
+                  (el2) => {
                     var _a2;
-                    return (_a2 = el.textContent) == null ? void 0 : _a2.includes("保持良好的学习习惯");
+                    return (_a2 = el2.textContent) == null ? void 0 : _a2.includes("保持良好的学习习惯");
                   }
                 );
                 if (dialog) {
@@ -14847,6 +16271,12 @@ ${searchContext}` : "",
             if (!video) {
               return;
             }
+            attachMediaToTask(video, {
+              platform: "知到智慧树",
+              onSkip: () => {
+                next2();
+              }
+            });
             const videoCheckInterval = setInterval(async () => {
               if (!(video == null ? void 0 : video.isConnected)) {
                 clearInterval(videoCheckInterval);
@@ -14864,7 +16294,7 @@ ${searchContext}` : "",
               $console.log("正在学习：" + cn);
             });
             video.onpause = async () => {
-              if (!(video == null ? void 0 : video.isConnected))
+              if (!(video == null ? void 0 : video.isConnected) || isUserPaused())
                 return;
               if (!(video == null ? void 0 : video.ended) && state$4.study.stop === false) {
                 await lib.$.sleep(1e3);
@@ -15041,6 +16471,12 @@ ${searchContext}` : "",
             if (!video) {
               return;
             }
+            attachMediaToTask(video, {
+              platform: "知到智慧树",
+              onSkip: () => {
+                next2();
+              }
+            });
             const videoCheckInterval = setInterval(async () => {
               if (!(video == null ? void 0 : video.isConnected)) {
                 clearInterval(videoCheckInterval);
@@ -15055,7 +16491,7 @@ ${searchContext}` : "",
               $console.log("正在学习：" + cn);
             });
             video.onpause = async () => {
-              if (!(video == null ? void 0 : video.isConnected))
+              if (!(video == null ? void 0 : video.isConnected) || isUserPaused())
                 return;
               if (!(video == null ? void 0 : video.ended) && state$4.study.stop === false) {
                 await lib.$.sleep(1e3);
@@ -15165,6 +16601,13 @@ ${searchContext}` : "",
     if (!video) {
       return await reload("视频加载失败");
     }
+    const detachTask = attachMediaToTask(video, {
+      platform: "知到智慧树",
+      onSkip: () => {
+        detachTask();
+        actions.onended({ next: true });
+      }
+    });
     const videoCheckInterval = setInterval(async () => {
       if ((video == null ? void 0 : video.isConnected) === false) {
         clearInterval(videoCheckInterval);
@@ -15176,6 +16619,9 @@ ${searchContext}` : "",
       lib.$store.setTab("reload-count", 0);
     });
     video.onpause = async () => {
+      if (isUserPaused()) {
+        return;
+      }
       if (!(video == null ? void 0 : video.ended) && state$4.study.stop === false) {
         await waitForCaptcha();
         await lib.$.sleep(1e3);
@@ -15183,6 +16629,7 @@ ${searchContext}` : "",
       }
     };
     video.onended = () => {
+      detachTask();
       clearInterval(videoCheckInterval);
       actions.onended({ next: true });
     };
@@ -15192,8 +16639,12 @@ ${searchContext}` : "",
     media.volume = options.volume;
     media.currentTime = 1;
     state$4.study.currentMedia = media;
+    attachMediaToTask(media, { platform: "知到智慧树" });
     playMedia(() => media == null ? void 0 : media.play());
     media.onpause = async () => {
+      if (isUserPaused()) {
+        return;
+      }
       if (!(media == null ? void 0 : media.ended)) {
         await lib.$.sleep(1e3);
         media == null ? void 0 : media.play();
@@ -15232,6 +16683,7 @@ ${searchContext}` : "",
     const popup = getPopupCaptcha();
     if (popup) {
       const message2 = lib.$message.warn({ content: "当前检测到验证码，请输入后方可继续运行。", duration: 0 });
+      const endBusy = beginBusy("captcha", "需要完成验证码");
       CommonProject.scripts.settings.methods.notificationBySetting(
         "智慧树脚本：当前检测到验证码，请输入后方可继续运行。",
         { duration: 0 }
@@ -15241,6 +16693,7 @@ ${searchContext}` : "",
           const popup2 = getPopupCaptcha();
           if (popup2 === null) {
             message2 == null ? void 0 : message2.remove();
+            endBusy();
             clearInterval(interval);
             resolve();
           }
@@ -19102,6 +20555,10 @@ ${searchContext}` : "",
       },
       async onResultsUpdate(current, _, res) {
         var _a, _b, _c;
+        updateTaskFromResults(res, {
+          kind: type === "exam" ? "exam" : "homework",
+          title: document.title.trim() || (type === "exam" ? "考试" : "作业")
+        });
         if (!preview_mode) {
           if ((_a = current.result) == null ? void 0 : _a.finish) {
             await CommonProject.scripts.workResults.methods.appendResults(
@@ -19238,8 +20695,8 @@ ${searchContext}` : "",
           match[i.toString()] = fontMap[hex];
         }
         const fonts = CXAnalyses.getSecretFont(doc);
-        fonts.forEach((el, index) => {
-          let html = el.innerHTML;
+        fonts.forEach((el2, index) => {
+          let html = el2.innerHTML;
           for (const key in match) {
             const word = String.fromCharCode(parseInt(key));
             const value = String.fromCharCode(match[key]);
@@ -19250,8 +20707,8 @@ ${searchContext}` : "",
               html = html.replace(word, value);
             }
           }
-          el.innerHTML = html;
-          el.classList.remove("font-cxsecret");
+          el2.innerHTML = html;
+          el2.classList.remove("font-cxsecret");
         });
         $console.log("识别繁体字完成。");
       } else {
@@ -19315,12 +20772,12 @@ ${searchContext}` : "",
       return this.getChapterInfos().every((chapter) => chapter.unFinishCount === 0);
     },
     getChapterInfos() {
-      return Array.from((top == null ? void 0 : top.document.querySelectorAll('[onclick^="getTeacherAjax"]')) || []).map((el) => {
+      return Array.from((top == null ? void 0 : top.document.querySelectorAll('[onclick^="getTeacherAjax"]')) || []).map((el2) => {
         var _a, _b, _c;
         return {
-          element: el,
-          chapterId: (_b = (_a = el.getAttribute("onclick")) == null ? void 0 : _a.match(/\('(.*)','(.*)','(.*)'\)/)) == null ? void 0 : _b[3],
-          unFinishCount: parseInt(((_c = el.parentElement.querySelector(".jobUnfinishCount")) == null ? void 0 : _c.value) || "0")
+          element: el2,
+          chapterId: (_b = (_a = el2.getAttribute("onclick")) == null ? void 0 : _a.match(/\('(.*)','(.*)','(.*)'\)/)) == null ? void 0 : _b[3],
+          unFinishCount: parseInt(((_c = el2.parentElement.querySelector(".jobUnfinishCount")) == null ? void 0 : _c.value) || "0")
         };
       });
     },
@@ -19437,6 +20894,8 @@ ${searchContext}` : "",
     var _a;
     await $.sleep(3e3);
     const searchedJobs = [];
+    resetTaskSteps();
+    setTaskState({ platform: "超星学习通" });
     let searching = true;
     const attachmentTotal = ((_a = lib.$gm.unsafeWindow.attachments) == null ? void 0 : _a.length) || 0;
     let graceRounds = 3;
@@ -19446,9 +20905,13 @@ ${searchContext}` : "",
     const runJobs = async () => {
       const job = searchJob(opts, searchedJobs);
       if (job && job.func) {
+        const stepId = String(job.mid);
+        upsertTaskStep({ id: stepId, status: "running" });
         try {
           await job.func();
+          upsertTaskStep({ id: stepId, status: "done" });
         } catch (e) {
+          upsertTaskStep({ id: stepId, status: "error" });
           $console.error("未知错误", e);
         }
         await $.sleep(1e3);
@@ -19465,6 +20928,14 @@ ${searchContext}` : "",
       }
     };
     await runJobs();
+    setTaskState({
+      kind: "other",
+      status: "running",
+      title: "本页任务点已处理完，正在跳转",
+      progress: 1,
+      busy: void 0,
+      canSkip: false
+    });
     $debug.log("cx.study", "任务点处理结束", {
       searched: searchedJobs.length,
       attachmentTotal,
@@ -19524,12 +20995,13 @@ ${searchContext}` : "",
       }
       if (CXProject.scripts.study.cfg.mode === "job") {
         if (CXAnalyses.isInFinalTab()) {
-          const elements2 = CXAnalyses.getChapterInfos().filter((el) => {
+          const elements2 = CXAnalyses.getChapterInfos().filter((el2) => {
             var _a2;
-            return el.unFinishCount > 0 || ((_a2 = el.element.parentElement) == null ? void 0 : _a2.classList.contains("posCatalog_active"));
-          }).map((el) => el.element.parentElement);
+            return el2.unFinishCount > 0 || ((_a2 = el2.element.parentElement) == null ? void 0 : _a2.classList.contains("posCatalog_active"));
+          }).map((el2) => el2.element.parentElement);
           if (elements2.length === 0) {
             const content = "全部任务点已完成！";
+            finishTask(content);
             lib.$modal.alert({ content });
             CommonProject.scripts.settings.methods.notificationBySetting(content, {
               duration: 0,
@@ -19537,7 +21009,7 @@ ${searchContext}` : "",
             });
             return;
           }
-          const currentIndex = elements2.findIndex((el) => el.classList.contains("posCatalog_active"));
+          const currentIndex = elements2.findIndex((el2) => el2.classList.contains("posCatalog_active"));
           let nextChapter;
           if (currentIndex !== -1 && currentIndex + 1 < elements2.length) {
             nextChapter = elements2[currentIndex + 1];
@@ -19545,7 +21017,7 @@ ${searchContext}` : "",
             const visitKey = "cx_job_fallback_visited";
             const visited = (await lib.$store.getTab(visitKey) || []).filter(Boolean);
             const fallback = elements2.find(
-              (el) => !el.classList.contains("posCatalog_active") && !visited.includes(el.id || el.textContent || "")
+              (el2) => !el2.classList.contains("posCatalog_active") && !visited.includes(el2.id || el2.textContent || "")
             );
             if (fallback) {
               visited.push(fallback.id || fallback.textContent || "");
@@ -19620,6 +21092,7 @@ ${searchContext}` : "",
       });
     } else {
       const msg = "页面任务点已完成，自动跳转已关闭，请手动跳转。";
+      finishTask("本页已完成，请手动跳转");
       lib.$message.warn({ content: msg, duration: 0 });
       $console.warn(msg);
     }
@@ -19765,7 +21238,7 @@ ${searchContext}` : "",
                       const msg = `开始答题 : ` + jobName;
                       lib.$message.info({ content: msg });
                       $console.log(msg);
-                      return JobRunner.chapter(root2, latestWorkOptions);
+                      return JobRunner.chapter(root2, latestWorkOptions, jobName);
                     };
                   }
                 }
@@ -19787,6 +21260,14 @@ ${searchContext}` : "",
                   const msg = `正在学习 : ` + jobName;
                   lib.$message.info({ content: msg });
                   $console.log(msg);
+                  setTaskState({
+                    kind: "document",
+                    status: "running",
+                    title: jobName,
+                    platform: "超星学习通",
+                    progress: null,
+                    canSkip: false
+                  });
                   if (read) {
                     return JobRunner.read(win);
                   } else {
@@ -19806,6 +21287,14 @@ ${searchContext}` : "",
                   const msg = `正在完成链接阅读任务 : ` + jobName;
                   lib.$message.info({ content: msg });
                   $console.log(msg);
+                  setTaskState({
+                    kind: "document",
+                    status: "running",
+                    title: jobName,
+                    platform: "超星学习通",
+                    progress: null,
+                    canSkip: false
+                  });
                   return JobRunner.hyperlink(hyperlink);
                 };
               }
@@ -19817,6 +21306,14 @@ ${searchContext}` : "",
             work_type,
             retryLater,
             mid: attachment.property.mid
+          });
+          const stepKind = videojs ? videojs.id === "audio" ? "audio" : "video" : chapterTest ? "quiz" : "document";
+          upsertTaskStep({
+            id: String(attachment.property.mid),
+            kind: stepKind,
+            title: jobName,
+            status: func ? "pending" : work_type === "finished" ? "done" : "skipped",
+            note: func ? void 0 : work_type === "finished" ? "已完成" : "未执行"
           });
           const job2 = {
             mid: attachment.property.mid,
@@ -19938,6 +21435,13 @@ ${searchContext}` : "",
       }
       state$3.study.videojs = videojs;
       top.currentMedia = media;
+      const mediaKind = videojs.id === "audio" ? "audio" : "video";
+      const stopTrack = trackMediaProgress(media, {
+        kind: mediaKind,
+        title: videoName,
+        platform: "超星学习通",
+        canSkip: true
+      });
       fixedVideoProgress();
       let quizLoopStopped = false;
       if (setting.videoQuizStrategy === "random" || setting.videoQuizStrategy === "search") {
@@ -20002,8 +21506,14 @@ ${searchContext}` : "",
           clearInterval(reloadInterval);
           clearInterval(stallInterval);
           media.removeEventListener("pause", playFunction);
+          stopTrack();
+          stopControl();
           action();
         };
+        const stopControl = registerMediaControl(media, () => {
+          $console.info("已跳过当前视频。");
+          finish(() => resolve());
+        });
         const reloadInterval = setInterval(() => {
           const errorDiv = doc.querySelector(".vjs-modal-dialog-content");
           if (["视频文件损坏", "网络错误导致视频下载中途失败", "视频因格式不支持", "网络的问题无法加载"].some(
@@ -20011,6 +21521,7 @@ ${searchContext}` : "",
           )) {
             $console.error("检测到视频加载失败，即将跳过视频。");
             lib.$message.error("检测到视频加载失败，即将跳过视频。");
+            setTaskState({ status: "error", message: "视频加载失败，已跳过" });
             $debug.warn("cx.media", "视频加载失败，跳过", { text: errorDiv == null ? void 0 : errorDiv.innerText.slice(0, 80) });
             finish(() => setTimeout(resolve, 3e3));
           }
@@ -20038,6 +21549,9 @@ ${searchContext}` : "",
           }
         }, 5e3);
         const playFunction = async () => {
+          if (isUserPaused()) {
+            return;
+          }
           if (hasFaceRecognition())
             await waitForFaceRecognition();
           if (hasNewFaceRecognition())
@@ -20070,7 +21584,7 @@ ${searchContext}` : "",
         finishJob();
       await $.sleep(3e3);
     },
-    async chapter(frame, options) {
+    async chapter(frame, options, jobName = "章节测验") {
       const {
         answererWrappers,
         period,
@@ -20199,6 +21713,7 @@ ${searchContext}` : "",
         },
         async onResultsUpdate(curr, _, res) {
           var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+          updateTaskFromResults(res, { kind: "quiz", title: jobName });
           CommonProject.scripts.workResults.methods.setResults(
             simplifyWorkResult(res, chapterTestTaskQuestionTitleTransform)
           );
@@ -20271,6 +21786,18 @@ ${searchContext}` : "",
         }
       });
       attachWorkFloatingBar(worker);
+      setTaskState({
+        kind: "quiz",
+        status: "running",
+        title: jobName,
+        platform: "超星学习通",
+        total: TiMu.length,
+        current: 0,
+        progress: 0,
+        questions: TiMu.map((_, index) => index === 0 ? "cur" : "pending"),
+        sources: { cache: 0, bank: 0, ai: 0 },
+        canSkip: false
+      });
       const results = await worker.doWork({ enable_debug: isDebugEnabled() });
       $debug.log("cx.chapter", "章节测验答题完成", {
         total: results.length,
@@ -21553,6 +23080,7 @@ ${searchContext}` : "",
   }
   function waitForNewFaceRecognition() {
     let notified = false;
+    let endBusy;
     return new Promise((resolve) => {
       const interval = setInterval(() => {
         const active = hasNewFaceRecognition();
@@ -21560,6 +23088,7 @@ ${searchContext}` : "",
           if (!notified) {
             notified = true;
             const msg = "检测到人脸识别，请手动进行识别后脚本才会继续运行。";
+            endBusy = beginBusy("captcha", "需要完成人脸识别");
             if (CXProject.scripts.study.cfg.notifyWhenHasFaceRecognition) {
               CommonProject.scripts.settings.methods.notificationBySetting(msg, { duration: 0 });
             }
@@ -21568,6 +23097,7 @@ ${searchContext}` : "",
           }
         } else {
           clearInterval(interval);
+          endBusy == null ? void 0 : endBusy();
           resolve();
         }
       }, 3e3);
@@ -21575,6 +23105,7 @@ ${searchContext}` : "",
   }
   function waitForFaceRecognition() {
     let notified = false;
+    let endBusy;
     return new Promise((resolve) => {
       const interval = setInterval(() => {
         const active = hasFaceRecognition();
@@ -21582,6 +23113,7 @@ ${searchContext}` : "",
           if (!notified) {
             notified = true;
             const msg = "检测到人脸识别，请手动进行识别后脚本才会继续运行。";
+            endBusy = beginBusy("captcha", "需要完成人脸识别");
             if (CXProject.scripts.study.cfg.notifyWhenHasFaceRecognition) {
               CommonProject.scripts.settings.methods.notificationBySetting(msg, { duration: 0 });
             }
@@ -21590,6 +23122,7 @@ ${searchContext}` : "",
           }
         } else {
           clearInterval(interval);
+          endBusy == null ? void 0 : endBusy();
           resolve();
         }
       }, 3e3);
@@ -21895,7 +23428,7 @@ ${searchContext}` : "",
             bar && (bar.style.overflow = "auto");
           }
           if (this.cfg.expandAll) {
-            lib.$$el(".s_sectionlist,.s_sectionwrap", mainContentWin.document).forEach((el) => el.style.display = "block");
+            lib.$$el(".s_sectionlist,.s_sectionwrap", mainContentWin.document).forEach((el2) => el2.style.display = "block");
           }
           for (const job of lib.$$el(".s_point[itemtype]", mainContentWin.document)) {
             job.addEventListener("click", (e) => {
@@ -21940,8 +23473,9 @@ ${searchContext}` : "",
                         await $.sleep(3e3);
                         resolve();
                       });
+                      attachMediaToTask(media, { platform: "智慧职教", onSkip: () => resolve() });
                       media.addEventListener("pause", async () => {
-                        if (!media.ended) {
+                        if (!media.ended && !isUserPaused()) {
                           await Promise.race([
                             waitForPopupQuestion(doc),
                             handleContinueDialog()
@@ -22147,7 +23681,7 @@ ${searchContext}` : "",
               content: "正在展开全部章节列表，请耐心等待不要操作..."
             });
             const titles = Array.from(document.querySelectorAll(".one-title")).filter(
-              (el) => !el.querySelector(".zhankai")
+              (el2) => !el2.querySelector(".zhankai")
             );
             const waitForChapterOpen = (title) => {
               return new Promise((resolve) => {
@@ -22185,8 +23719,8 @@ ${searchContext}` : "",
           if (this.cfg.autoOpenAllChapter)
             await openAllChapter();
           let study_id = "";
-          document.querySelectorAll(".node").forEach((el) => {
-            el.addEventListener("click", () => {
+          document.querySelectorAll(".node").forEach((el2) => {
+            el2.addEventListener("click", () => {
               study2(study_id = Math.random().toString(36).substr(2, 9));
             });
           });
@@ -22302,14 +23836,16 @@ ${searchContext}` : "",
       return;
     }
     return new Promise((resolve, reject) => {
+      const detach = attachMediaToTask(media, { platform: "智慧职教", onSkip: () => resolve() });
       media.addEventListener("ended", () => {
+        detach();
         resolve();
       });
       media.addEventListener("pause", () => {
         setTimeout(() => {
           if (media.ended) {
             resolve();
-          } else if (media.paused) {
+          } else if (media.paused && !isUserPaused()) {
             media.play();
             media.volume = parseFloat(IcveMoocProject.scripts["ai-study"].cfg.volume.toString());
             media.playbackRate = parseFloat(IcveMoocProject.scripts["ai-study"].cfg.playbackRate.toString());
@@ -22578,18 +24114,18 @@ ${searchContext}` : "",
     return new Promise((resolve) => {
       const interval = setInterval(() => {
         var _a, _b;
-        const el = lib.$el(".popup-test", dom2);
-        if (el) {
+        const el2 = lib.$el(".popup-test", dom2);
+        if (el2) {
           clearInterval(interval);
-          const right_answer = ((_a = lib.$el("#right_answer", el)) == null ? void 0 : _a.value) || "A";
+          const right_answer = ((_a = lib.$el("#right_answer", el2)) == null ? void 0 : _a.value) || "A";
           for (const answer of right_answer.split("")) {
-            const item = lib.$el(`li.test-item-cell[curval="${answer}"]`, el);
+            const item = lib.$el(`li.test-item-cell[curval="${answer}"]`, el2);
             item == null ? void 0 : item.click();
           }
-          (_b = lib.$el('[name="save_btn"]', el)) == null ? void 0 : _b.click();
+          (_b = lib.$el('[name="save_btn"]', el2)) == null ? void 0 : _b.click();
           setTimeout(() => {
             var _a2;
-            (_a2 = lib.$el('[name="continue_btn"]', el)) == null ? void 0 : _a2.click();
+            (_a2 = lib.$el('[name="continue_btn"]', el2)) == null ? void 0 : _a2.click();
             resolve();
           }, 3e3);
         }
@@ -22604,9 +24140,9 @@ ${searchContext}` : "",
   function handleContinueDialog() {
     return new Promise((resolve, reject) => {
       const interval = setInterval(() => {
-        const el = document.querySelector(".layui-layer-btn0");
-        if (el) {
-          el.click();
+        const el2 = document.querySelector(".layui-layer-btn0");
+        if (el2) {
+          el2.click();
           setTimeout(() => {
             clearInterval(interval);
             resolve();
@@ -22889,14 +24425,16 @@ ${searchContext}` : "",
       return;
     }
     return new Promise((resolve, reject) => {
+      const detach = attachMediaToTask(media, { platform: "职教云", onSkip: () => resolve() });
       media.addEventListener("ended", () => {
+        detach();
         resolve();
       });
       media.addEventListener("pause", () => {
         setTimeout(() => {
           if (media.ended) {
             resolve();
-          } else if (media.paused) {
+          } else if (media.paused && !isUserPaused()) {
             media.play();
             media.volume = parseFloat(ZJYProject.scripts.study.cfg.volume.toString());
             media.playbackRate = parseFloat(ZJYProject.scripts.study.cfg.playbackRate.toString());
@@ -23073,9 +24611,9 @@ ${searchContext}` : "",
         return void 0;
       }
       if (kejianListEl.style.display === "none") {
-        (_a = Array.from(document.querySelectorAll(".courseBtn div.customBtn")).find((el) => {
+        (_a = Array.from(document.querySelectorAll(".courseBtn div.customBtn")).find((el2) => {
           var _a2;
-          return (_a2 = el.textContent) == null ? void 0 : _a2.includes("课件目录");
+          return (_a2 = el2.textContent) == null ? void 0 : _a2.includes("课件目录");
         })) == null ? void 0 : _a.click();
         await $.sleep(1e3);
       }
@@ -23428,9 +24966,9 @@ ${searchContext}` : "",
               async function gotoNextJob() {
                 const list = await next2();
                 for (const item of list) {
-                  const el = typeof item === "function" ? item() : item;
-                  if (el) {
-                    await (remotePage == null ? void 0 : remotePage.click(el));
+                  const el2 = typeof item === "function" ? item() : item;
+                  if (el2) {
+                    await (remotePage == null ? void 0 : remotePage.click(el2));
                   }
                 }
                 if (list.length === 0) {
@@ -23672,9 +25210,9 @@ ${searchContext}` : "",
         }
       },
       onElementSearched(elements2, root2) {
-        elements2.options.forEach((el) => {
-          const correct = el.querySelector(".u-icon-correct");
-          const wrong = el.querySelector(".u-icon-wrong");
+        elements2.options.forEach((el2) => {
+          const correct = el2.querySelector(".u-icon-correct");
+          const wrong = el2.querySelector(".u-icon-wrong");
           if (correct) {
             correct.replaceWith("对");
           }
@@ -23738,13 +25276,15 @@ ${searchContext}` : "",
         video.playbackRate = playbackRate2;
         video.volume = volume2;
         state.currentMedia = video;
+        const detach = attachMediaToTask(video, { platform: "中国大学MOOC", onSkip: () => resolve() });
         playMedia(() => video == null ? void 0 : video.play());
         video.onpause = async () => {
-          if (!(video == null ? void 0 : video.ended)) {
+          if (!(video == null ? void 0 : video.ended) && !isUserPaused()) {
             video == null ? void 0 : video.play();
           }
         };
         video.onended = () => {
+          detach();
           resolve();
         };
       }).catch(reject);
@@ -23847,23 +25387,48 @@ ${searchContext}` : "",
   exports2.RemotePlaywright = RemotePlaywright;
   exports2.RenderScript = RenderScript;
   exports2.StringUtils = StringUtils;
+  exports2.TASK_KIND_LABEL = TASK_KIND_LABEL;
+  exports2.TASK_STALE_MS = TASK_STALE_MS;
+  exports2.TASK_STATUS_LABEL = TASK_STATUS_LABEL;
   exports2.ZHSProject = ZHSProject;
   exports2.ZJYProject = ZJYProject;
   exports2.answerExactMatch = answerExactMatch;
   exports2.answerSimilar = answerSimilar;
+  exports2.attachMediaToTask = attachMediaToTask;
+  exports2.beginBusy = beginBusy;
   exports2.clearString = clearString;
+  exports2.clearTaskState = clearTaskState;
   exports2.createDefaultQuestionResolver = createDefaultQuestionResolver;
   exports2.defaultAnswerWrapperHandler = defaultAnswerWrapperHandler;
   exports2.defaultWorkTypeResolver = defaultWorkTypeResolver;
   exports2.definedProjects = definedProjects;
   exports2.domSearch = domSearch;
   exports2.domSearchAll = domSearchAll;
+  exports2.finishTask = finishTask;
+  exports2.getTabId = getTabId;
+  exports2.getTaskState = getTaskState;
+  exports2.getUpdateInfo = getUpdateInfo;
+  exports2.installTaskStateSync = installTaskStateSync;
   exports2.isPlainAnswer = isPlainAnswer;
+  exports2.isTaskStale = isTaskStale;
+  exports2.isUserPaused = isUserPaused;
+  exports2.onTaskCommand = onTaskCommand;
+  exports2.onTaskStateChange = onTaskStateChange;
+  exports2.onUpdateInfoChange = onUpdateInfoChange;
+  exports2.registerMediaControl = registerMediaControl;
   exports2.removeRedundant = removeRedundant;
   exports2.request = request;
+  exports2.resetTaskSteps = resetTaskSteps;
   exports2.resolvePlainAnswer = resolvePlainAnswer;
+  exports2.sendTaskCommand = sendTaskCommand;
+  exports2.setTaskState = setTaskState;
+  exports2.setUpdateInfo = setUpdateInfo;
   exports2.splitAnswer = splitAnswer;
   exports2.start = lib.start;
+  exports2.toggleTaskPause = toggleTaskPause;
+  exports2.trackMediaProgress = trackMediaProgress;
+  exports2.updateTaskFromResults = updateTaskFromResults;
+  exports2.upsertTaskStep = upsertTaskStep;
   Object.defineProperties(exports2, { __esModule: { value: true }, [Symbol.toStringTag]: { value: "Module" } });
 });
 
@@ -25033,6 +26598,1551 @@ modal-element {
 .checked .checkbox-label::before {
 	content: '🔼';
 }
+/* ==================== 工作台外壳（收起圆点 / 标题栏 / 导航 / 状态栏）==================== */
+
+container-element {
+	--ncp-bg: #ffffff;
+	--ncp-bg-soft: #f7f8fa;
+	--ncp-border: #e3e7ec;
+	--ncp-text: #2b2f36;
+	--ncp-text-soft: #6b7482;
+	--ncp-text-mute: #98a1ae;
+	--ncp-primary: #1890ff;
+	--ncp-primary-soft: #e8f3ff;
+	--ncp-green: #1b8a4c;
+	--ncp-green-soft: #e6f5ec;
+	--ncp-amber-soft: #fff3dc;
+	--ncp-amber: #8a5a00;
+	color: var(--ncp-text);
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif !important;
+	letter-spacing: 0;
+}
+
+/* 展开：标题栏 / 导航 / 内容 / 状态栏 */
+container-element.normal {
+	display: grid;
+	grid-template-columns: 176px minmax(0, 1fr);
+	grid-template-rows: 46px minmax(0, 1fr) 30px;
+	grid-template-areas: 'title title' 'nav main' 'status status';
+	width: 820px;
+	height: 540px;
+	min-width: 0 !important;
+	max-width: calc(100vw - 16px);
+	max-height: calc(100vh - 16px);
+	background: var(--ncp-bg);
+	border: 1px solid #c9d0d9;
+	border-radius: 12px;
+	box-shadow: 0 16px 48px -16px rgba(15, 23, 42, 0.4);
+	font-size: 13px;
+}
+
+container-element.normal > header-element,
+container-element.normal > .footer {
+	display: none;
+}
+
+container-element.normal > .body {
+	grid-area: main;
+	min-height: 0;
+	max-height: none !important;
+	max-width: none !important;
+	height: auto;
+	overflow: auto;
+	padding: 14px 18px 18px;
+	background: var(--ncp-bg);
+}
+
+container-element:not(.minimize) > .ncp-dot {
+	display: none;
+}
+
+/* 收起：只剩一个 44px 圆点 */
+container-element.minimize {
+	width: 44px;
+	height: 44px;
+	min-width: 0 !important;
+	border: none;
+	border-radius: 50%;
+	background: transparent;
+	box-shadow: none;
+}
+
+container-element.minimize > :not(.ncp-dot):not(.message-container):not(.tooltip-container):not(style) {
+	display: none !important;
+}
+
+/* 标题栏 */
+.ncp-titlebar {
+	grid-area: title;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 0 10px 0 14px;
+	background: #fafbfc;
+	border-bottom: 1px solid var(--ncp-border);
+	border-radius: 12px 12px 0 0;
+	cursor: move;
+	user-select: none;
+	min-width: 0;
+}
+.ncp-logo {
+	display: inline-flex;
+	color: var(--ncp-primary);
+}
+.ncp-name {
+	font-weight: 600;
+	font-size: 14px;
+}
+.ncp-ver {
+	color: var(--ncp-text-mute);
+	font-size: 11px;
+}
+.ncp-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 2px 9px;
+	border-radius: 11px;
+	font-size: 12px;
+	white-space: nowrap;
+	background: var(--ncp-green-soft);
+	color: var(--ncp-green);
+}
+.ncp-chip[data-status='idle'] {
+	background: #eef0f3;
+	color: #5b6472;
+}
+.ncp-chip[data-status='paused'] {
+	background: #eef0f3;
+	color: #4b5563;
+}
+.ncp-chip[data-status='attention'] {
+	background: var(--ncp-amber-soft);
+	color: var(--ncp-amber);
+}
+.ncp-chip[data-status='error'] {
+	background: #fdecec;
+	color: #a32d2d;
+}
+.ncp-chip[data-status='done'] {
+	background: #e3f6f1;
+	color: #0f6e56;
+}
+.ncp-task-title {
+	color: var(--ncp-text-soft);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+.ncp-spacer {
+	flex: 1;
+}
+.ncp-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 10px;
+	border: 1px solid #d3d9e1;
+	border-radius: 6px;
+	background: #fff;
+	color: var(--ncp-text);
+	font-size: 12px;
+	cursor: pointer;
+	white-space: nowrap;
+	font-family: inherit;
+}
+.ncp-btn:hover {
+	background: #f3f6fa;
+}
+.ncp-btn.primary {
+	background: var(--ncp-primary);
+	border-color: var(--ncp-primary);
+	color: #fff;
+}
+.ncp-btn.primary:hover {
+	background: #3aa0ff;
+}
+.ncp-btn.on {
+	background: #efe8fb;
+	border-color: #7f5bd6;
+	color: #5a3aa8;
+}
+.ncp-btn.icon-only {
+	padding: 4px 6px;
+	border-color: transparent;
+	background: transparent;
+	color: var(--ncp-text-soft);
+}
+.ncp-btn.icon-only:hover {
+	background: #e9edf2;
+}
+
+/* 左侧导航 */
+.ncp-nav {
+	grid-area: nav;
+	overflow: auto;
+	padding: 6px 8px 10px;
+	background: #fafbfc;
+	border-right: 1px solid var(--ncp-border);
+	min-height: 0;
+}
+.ncp-nav-group {
+	font-size: 11px;
+	color: var(--ncp-text-mute);
+	padding: 12px 10px 4px;
+}
+.ncp-nav-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 10px;
+	border-radius: 6px;
+	color: #4b5563;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+}
+.ncp-nav-item > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.ncp-nav-item:hover {
+	background: #eef1f5;
+}
+.ncp-nav-item.active {
+	background: var(--ncp-primary-soft);
+	color: #0c5bb0;
+	font-weight: 500;
+}
+
+/* 状态栏 */
+.ncp-statusbar {
+	grid-area: status;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 0 12px;
+	background: #fafbfc;
+	border-top: 1px solid var(--ncp-border);
+	border-radius: 0 0 12px 12px;
+	font-size: 11px;
+	color: var(--ncp-text-soft);
+	min-width: 0;
+}
+.ncp-status-items,
+.ncp-status-right {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	min-width: 0;
+	white-space: nowrap;
+}
+.ncp-status-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+.ncp-status-item.warn {
+	color: #b45309;
+}
+.ncp-status-item.update {
+	color: #0c5bb0;
+	cursor: pointer;
+	font-weight: 500;
+}
+
+.ncp-icon {
+	flex: none;
+	vertical-align: middle;
+}
+
+/* 收起的圆点 */
+.ncp-dot {
+	position: relative;
+	width: 44px;
+	height: 44px;
+	cursor: pointer;
+	color: #fff;
+	user-select: none;
+}
+.ncp-dot-face {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 44px;
+	height: 44px;
+	z-index: 2;
+}
+.ncp-dot.flip .ncp-dot-face {
+	left: auto;
+	right: 0;
+}
+.ncp-dot-ring {
+	position: absolute;
+	left: 0;
+	top: 0;
+}
+.ncp-dot.indeterminate .ncp-dot-ring {
+	animation: ncp-spin 1.1s linear infinite;
+}
+.ncp-dot-icon {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+}
+.ncp-badge {
+	position: absolute;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 3px;
+	border-radius: 8px;
+	font-size: 10px;
+	line-height: 16px;
+	text-align: center;
+	color: #fff;
+	border: 1.5px solid #fff;
+	box-sizing: border-box;
+	display: none;
+	pointer-events: none;
+}
+.ncp-badge.tl {
+	left: -3px;
+	top: -3px;
+	background: #7f5bd6;
+}
+.ncp-badge.br {
+	right: -3px;
+	bottom: -3px;
+	background: #c0392b;
+}
+
+/* 悬停时从圆点长出来的胶囊 */
+.ncp-capsule {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 44px;
+	height: 44px;
+	border-radius: 22px;
+	background: #1f2937;
+	overflow: hidden;
+	opacity: 0;
+	pointer-events: none;
+	transition: width 0.18s ease, opacity 0.12s ease;
+	box-shadow: 0 10px 28px -10px rgba(15, 23, 42, 0.55);
+	z-index: 1;
+}
+.ncp-dot.flip .ncp-capsule {
+	left: auto;
+	right: 0;
+}
+.ncp-dot:hover .ncp-capsule {
+	width: var(--ncp-cap-w, 232px);
+	opacity: 1;
+	pointer-events: auto;
+}
+.ncp-cap-body {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 44px;
+	width: var(--ncp-cap-w, 232px);
+	box-sizing: border-box;
+	padding: 0 8px 0 52px;
+	white-space: nowrap;
+}
+.ncp-dot.flip .ncp-cap-body {
+	padding: 0 52px 0 12px;
+}
+.ncp-cap-pct {
+	font-size: 14px;
+	font-weight: 600;
+	min-width: 34px;
+	text-align: left;
+	letter-spacing: 0;
+}
+.ncp-cap-text {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	line-height: 1.3;
+}
+.ncp-cap-text .l1 {
+	font-size: 11px;
+	color: #fff;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.ncp-cap-text .l2 {
+	font-size: 10px;
+	color: #9aa3af;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.ncp-cap-btn {
+	flex: none;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	border: none;
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	padding: 0;
+}
+.ncp-cap-btn:hover {
+	background: rgba(255, 255, 255, 0.24);
+}
+.ncp-cap-bar {
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	height: 2px;
+	width: 0;
+	background: #3ddc84;
+	transition: width 0.3s ease;
+}
+
+@keyframes ncp-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* ==================== 总览页 ==================== */
+
+.ov-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+	gap: 12px;
+	align-items: start;
+}
+.ov-col {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 0;
+}
+.ov-card {
+	border: 1px solid var(--ncp-border, #e3e7ec);
+	border-radius: 10px;
+	padding: 12px 14px;
+	background: #fff;
+}
+.ov-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 8px;
+	flex-wrap: wrap;
+}
+.ov-spacer {
+	flex: 1;
+}
+.ov-mute {
+	font-size: 11px;
+	color: #98a1ae;
+	font-weight: 400;
+}
+.ov-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 9px;
+	border-radius: 10px;
+	font-size: 12px;
+	background: #e8f3ff;
+	color: #0c5bb0;
+	white-space: nowrap;
+}
+.ov-chip[data-status='running'] {
+	background: #e6f5ec;
+	color: #1b6b3a;
+}
+.ov-chip.soft[data-status='running'] {
+	background: transparent;
+	color: #1b6b3a;
+	padding-left: 0;
+}
+.ov-chip[data-status='idle'],
+.ov-chip[data-status='paused'] {
+	background: #eef0f3;
+	color: #4b5563;
+}
+.ov-chip.soft[data-status='paused'],
+.ov-chip.soft[data-status='idle'] {
+	background: transparent;
+	padding-left: 0;
+}
+.ov-chip[data-status='attention'] {
+	background: #fff3dc;
+	color: #8a5a00;
+}
+.ov-chip[data-status='error'] {
+	background: #fdecec;
+	color: #a32d2d;
+}
+.ov-chip[data-status='done'] {
+	background: #e3f6f1;
+	color: #0f6e56;
+}
+.ov-chip[data-status='busy'] {
+	background: #e3effd;
+	color: #0c5bb0;
+}
+.ov-chip.soft[data-status='done'],
+.ov-chip.soft[data-status='attention'],
+.ov-chip.soft[data-status='error'] {
+	background: transparent;
+	padding-left: 0;
+}
+.ov-title {
+	font-size: 14px;
+	font-weight: 600;
+	margin-bottom: 10px;
+	line-height: 1.4;
+	word-break: break-all;
+}
+.ov-sub {
+	font-size: 12px;
+	color: #6b7482;
+	line-height: 1.6;
+	margin-bottom: 10px;
+}
+.ov-progress {
+	height: 6px;
+	border-radius: 3px;
+	background: #e6e9ee;
+	overflow: hidden;
+}
+.ov-progress > i {
+	display: block;
+	height: 100%;
+	background: #1890ff;
+	transition: width 0.4s ease;
+}
+.ov-row {
+	display: flex;
+	justify-content: space-between;
+	font-size: 12px;
+	color: #6b7482;
+	margin: 6px 0 10px;
+}
+.ov-actions {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+.ov-sec-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: #6b7482;
+	margin-bottom: 8px;
+}
+.ov-link {
+	margin-left: auto;
+	border: none;
+	background: none;
+	color: #1890ff;
+	font-size: 12px;
+	cursor: pointer;
+	padding: 0;
+	font-family: inherit;
+}
+.ov-qs {
+	display: flex;
+	gap: 5px;
+	flex-wrap: wrap;
+}
+.ov-q {
+	width: 24px;
+	height: 24px;
+	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 11px;
+	background: #eef0f3;
+	color: #6b7482;
+}
+.ov-q.ok {
+	background: #e6f5ec;
+	color: #1b6b3a;
+}
+.ov-q.cur {
+	background: #1890ff;
+	color: #fff;
+}
+.ov-q.miss {
+	background: #fdecec;
+	color: #a32d2d;
+}
+.ov-legend {
+	display: flex;
+	gap: 12px;
+	margin-top: 8px;
+	font-size: 11px;
+	color: #98a1ae;
+}
+.ov-legend > span::before {
+	content: '';
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	margin-right: 4px;
+	background: #eef0f3;
+}
+.ov-legend .ok::before {
+	background: #6fcf97;
+}
+.ov-legend .cur::before {
+	background: #1890ff;
+}
+.ov-legend .miss::before {
+	background: #f0605d;
+}
+.ov-step {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 0;
+	border-bottom: 1px solid #f0f2f5;
+}
+.ov-step:last-child {
+	border-bottom: none;
+}
+.ov-step .m {
+	width: 22px;
+	height: 22px;
+	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: #eef0f3;
+	color: #6b7482;
+	flex: none;
+}
+.ov-step.done .m {
+	background: #e6f5ec;
+	color: #1b6b3a;
+}
+.ov-step.running .m {
+	background: #1890ff;
+	color: #fff;
+}
+.ov-step.error .m {
+	background: #fdecec;
+	color: #a32d2d;
+}
+.ov-step .k {
+	color: #6b7482;
+	display: inline-flex;
+}
+.ov-step .n {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.ov-step.pending .n,
+.ov-step.skipped .n {
+	color: #98a1ae;
+}
+.ov-step .s {
+	font-size: 11px;
+	color: #98a1ae;
+	white-space: nowrap;
+}
+.ov-chips {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+.ov-log {
+	display: flex;
+	gap: 6px;
+	padding: 3px 0;
+	font-size: 12px;
+	line-height: 1.6;
+	align-items: baseline;
+}
+.ov-log .t {
+	color: #98a1ae;
+	flex: none;
+}
+.ov-log .lv {
+	flex: none;
+	font-size: 11px;
+	padding: 0 5px;
+	border-radius: 4px;
+	background: #e3effd;
+	color: #0c5bb0;
+}
+.ov-log .lv.warn {
+	background: #fff3dc;
+	color: #8a5a00;
+}
+.ov-log .lv.error {
+	background: #fdecec;
+	color: #a32d2d;
+}
+.ov-log .lv.debug,
+.ov-log .lv.log {
+	background: #eef0f3;
+	color: #4b5563;
+}
+.ov-log .c {
+	min-width: 0;
+	word-break: break-all;
+	color: #3f4652;
+}
+.ov-empty {
+	color: #98a1ae;
+	font-size: 12px;
+	padding: 6px 0;
+}
+
+/* ==================== 内容区：各个面板的统一样式 ==================== */
+
+container-element.normal > .body {
+	background: #f6f7f9;
+	padding: 18px 22px 24px;
+}
+container-element.normal script-panel-element {
+	padding: 0;
+	border-radius: 0;
+	background: transparent;
+}
+container-element.normal script-panel-element + script-panel-element {
+	margin-top: 12px;
+}
+container-element.normal script-panel-element .script-panel-body {
+	padding: 0;
+}
+
+/* 面板标题 */
+container-element.normal script-panel-element > .separator {
+	justify-content: flex-start;
+	text-align: left;
+	font-size: 17px;
+	font-weight: 600;
+	padding: 0 0 10px;
+	color: var(--ncp-text);
+}
+container-element.normal script-panel-element > .separator::before,
+container-element.normal script-panel-element > .separator::after {
+	display: none;
+}
+
+/* 面板说明：淡蓝色的提示条 */
+container-element.normal .notes {
+	margin: 0 0 14px;
+	padding: 8px 14px;
+	border: none;
+	border-radius: 10px;
+	background: #eaf3ff;
+	color: #2f4b6e;
+	line-height: 1.7;
+	letter-spacing: 0;
+	width: auto;
+}
+container-element.normal .notes:empty {
+	display: none;
+}
+container-element.normal .notes ul,
+container-element.normal .notes ol {
+	line-height: 1.7;
+	padding-left: 18px;
+}
+container-element.normal .notes li::marker {
+	color: #6aa8f0;
+}
+
+container-element.normal .card {
+	padding: 0;
+	background: transparent;
+}
+container-element.normal .card + .card {
+	margin-top: 12px;
+}
+
+/* 设置区：外层不再套边框，每个分组一张白色卡片，分组标题在卡片上方 */
+container-element.normal .configs-container.card {
+	border: none;
+	padding: 0;
+	margin: 0;
+	background: transparent;
+}
+container-element.normal .configs-container.card:empty {
+	display: none;
+}
+container-element.normal .configs-container .separator {
+	justify-content: flex-start;
+	margin: 18px 0 8px !important;
+	padding: 0;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--ncp-text);
+}
+container-element.normal .configs-container .separator::before {
+	content: '';
+	flex: none;
+	width: 3px;
+	height: 14px;
+	margin-right: 8px;
+	border: none;
+	border-radius: 2px;
+	background: var(--ncp-primary);
+}
+container-element.normal .configs-container .separator::after {
+	display: none;
+}
+container-element.normal .configs-container > .configs:first-child {
+	margin-top: 0;
+}
+container-element.normal .configs {
+	display: block;
+	width: auto;
+	border: 1px solid var(--ncp-border);
+	border-radius: 12px;
+	padding: 2px 16px;
+	background: #fff;
+}
+container-element.normal .configs:not(:has(config-element)),
+container-element.normal .configs:has(.configs-body:empty) {
+	display: none;
+}
+container-element.normal .configs .configs-body {
+	display: block;
+}
+
+/* 设置项：左边名称和说明，右边控件 */
+container-element.normal .configs .configs-body config-element {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 20px;
+	width: auto;
+	padding: 11px 0;
+	line-height: 1.5;
+	border-bottom: 1px solid #f0f2f5;
+}
+container-element.normal .configs .configs-body config-element:last-child {
+	border-bottom: none;
+}
+container-element.normal .configs .configs-body config-element label {
+	display: block;
+	flex: 1 1 52%;
+	min-width: 0;
+	white-space: normal;
+	padding: 0;
+	margin: 0;
+	color: var(--ncp-text);
+	font-weight: 500;
+}
+container-element.normal .configs .configs-body config-element .cfg-desc {
+	margin-top: 3px;
+	font-size: 11px;
+	font-weight: 400;
+	line-height: 1.55;
+	color: #8a93a1;
+}
+container-element.normal .configs .configs-body config-element .config-wrapper {
+	display: flex;
+	flex: 0 1 44%;
+	justify-content: flex-end;
+	align-items: center;
+	min-width: 0;
+	padding: 0;
+}
+container-element.normal .configs .configs-body config-element .config-wrapper > *:not(.tooltip) {
+	float: none;
+	background: transparent;
+}
+container-element.normal .configs .configs-body config-element:has(textarea) {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+}
+container-element.normal .configs .configs-body config-element:has(textarea) .config-wrapper {
+	flex: none;
+	justify-content: stretch;
+}
+
+/* 控件 */
+container-element.normal
+	.configs
+	.config-wrapper
+	input:not([type='checkbox'], [type='radio'], [type='range'], [type='button']),
+container-element.normal .configs .config-wrapper select,
+container-element.normal .configs .config-wrapper textarea {
+	width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
+	height: 32px;
+	border: 1px solid #dfe4ea;
+	border-radius: 8px;
+	background: #fff;
+	color: var(--ncp-text);
+	padding: 0 10px;
+	font-size: 13px;
+	font-family: inherit;
+	outline: none;
+}
+container-element.normal .configs .config-wrapper textarea {
+	height: auto;
+	min-height: 72px;
+	padding: 8px 10px;
+	line-height: 1.5;
+}
+container-element.normal .configs .config-wrapper input:focus,
+container-element.normal .configs .config-wrapper select:focus,
+container-element.normal .configs .config-wrapper textarea:focus {
+	border-color: var(--ncp-primary);
+	box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.15);
+}
+container-element.normal .configs .config-wrapper input[type='button'] {
+	width: auto;
+	min-width: 120px;
+	height: 32px;
+	padding: 0 14px;
+	border: 1px solid #b7d9ff;
+	border-radius: 8px;
+	background: #f0f7ff;
+	color: #0c5bb0;
+	font-size: 12px;
+	font-family: inherit;
+	cursor: pointer;
+}
+container-element.normal .configs .config-wrapper input[type='button']:hover {
+	background: #e0efff;
+}
+container-element.normal .configs .config-wrapper input[type='range'] {
+	width: 100%;
+	height: auto;
+	padding: 0;
+	border: none;
+	background: transparent;
+}
+
+/* 按钮 */
+container-element.normal .base-style-button,
+container-element.normal .base-style-button-secondary {
+	border-radius: 8px;
+	padding: 5px 14px;
+	font-size: 12px;
+	font-family: inherit;
+	margin-bottom: 0;
+	border-width: 1px;
+}
+container-element.normal .base-style-button {
+	border-color: #b7d9ff;
+	background: #f0f7ff;
+	color: #0c5bb0;
+}
+container-element.normal .base-style-button:hover {
+	background: #e0efff;
+}
+container-element.normal .base-style-button-secondary {
+	border-color: #dfe4ea;
+	background: #fff;
+	color: #4b5563;
+}
+container-element.normal .base-style-button-secondary:hover {
+	background: #f3f5f8;
+}
+
+/* 内容区里自定义页面常用的容器：统一成白色卡片 */
+container-element.normal .script-panel-body > .card,
+container-element.normal .script-panel-body > div > .card {
+	border: 1px solid var(--ncp-border);
+	border-radius: 12px;
+	padding: 12px 14px;
+	background: #fff;
+}
+container-element.normal .script-panel-body .separator {
+	justify-content: flex-start;
+	font-size: 13px;
+	font-weight: 600;
+	padding: 6px 0;
+	color: var(--ncp-text);
+}
+container-element.normal .script-panel-body .separator::before,
+container-element.normal .script-panel-body .separator::after {
+	display: none;
+}
+
+/* 日志 */
+container-element.normal .console {
+	max-width: none;
+	max-height: none;
+	border-radius: 10px;
+	padding: 12px 14px;
+	font-size: 12px;
+	line-height: 1.7;
+}
+container-element.normal .console .item {
+	padding: 2px 0;
+}
+container-element.normal .markdown {
+	max-width: none;
+}
+
+/* 操作列表（拓展应用等） */
+.ncp-group-title {
+	font-size: 12px;
+	color: #8a93a1;
+	margin: 14px 0 8px;
+}
+.ncp-group-title:first-child {
+	margin-top: 0;
+}
+.ncp-action {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	margin-bottom: 8px;
+	border: 1px solid var(--ncp-border);
+	border-radius: 12px;
+	background: #fff;
+	cursor: pointer;
+}
+.ncp-action:hover {
+	border-color: #91c8ff;
+	background: #fbfdff;
+}
+.ncp-action-icon {
+	flex: none;
+	width: 36px;
+	height: 36px;
+	border-radius: 10px;
+	background: var(--ncp-primary-soft);
+	color: #0c5bb0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+.ncp-action-text {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.ncp-action-text b {
+	font-weight: 500;
+	font-size: 13px;
+	color: var(--ncp-text);
+}
+.ncp-action-text small {
+	font-size: 11px;
+	color: #8a93a1;
+	line-height: 1.5;
+}
+.ncp-action-go {
+	color: #b4bcc8;
+	display: inline-flex;
+}
+.ncp-hint {
+	font-size: 12px;
+	color: #8a93a1;
+	line-height: 1.7;
+	padding: 8px 2px;
+}
+
+/* 使用教程页 */
+.gd-hero {
+	padding: 16px 18px;
+	border-radius: 12px;
+	background: #eaf3ff;
+	border: 1px solid #cfe5ff;
+}
+.gd-hero-title {
+	font-size: 18px;
+	font-weight: 600;
+	color: #0c3d73;
+}
+.gd-hero-sub {
+	margin-top: 4px;
+	color: #3d5f86;
+	line-height: 1.6;
+}
+.gd-section {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	margin: 20px 0 8px;
+	font-size: 13px;
+	font-weight: 600;
+}
+.gd-section-sub {
+	font-size: 11px;
+	font-weight: 400;
+	color: #8a93a1;
+}
+.gd-steps {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.gd-step {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	border: 1px solid var(--ncp-border);
+	border-radius: 12px;
+	background: #fff;
+}
+.gd-step-n {
+	flex: none;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--ncp-primary);
+	color: #fff;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 13px;
+	font-weight: 600;
+}
+.gd-step-body {
+	flex: 1;
+	min-width: 0;
+}
+.gd-step-body b {
+	font-weight: 500;
+}
+.gd-step-desc {
+	margin-top: 2px;
+	font-size: 12px;
+	color: #6b7482;
+	line-height: 1.6;
+}
+.gd-platforms {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+	gap: 8px;
+}
+.gd-platform {
+	padding: 10px 12px;
+	border: 1px solid var(--ncp-border);
+	border-radius: 10px;
+	background: #fff;
+	color: var(--ncp-text);
+	font-size: 13px;
+	font-family: inherit;
+	cursor: pointer;
+	text-align: left;
+}
+.gd-platform:hover {
+	border-color: #91c8ff;
+	background: #fbfdff;
+}
+.gd-tips {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.gd-tip {
+	padding: 8px 12px;
+	border-radius: 8px;
+	background: #fff8e8;
+	color: #7a5200;
+	line-height: 1.6;
+	border-left: 3px solid #f0b429;
+}
+.gd-links {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+/* ==================== 内容区补充：开关、输入框、请求记录 ==================== */
+
+/* 开关：保留轨道底色（上面“控件背景透明”的统一规则不能盖掉它） */
+container-element.normal .configs .configs-body config-element .config-wrapper input[type='checkbox'] {
+	flex: none;
+	width: 36px;
+	min-width: 36px;
+	height: 20px;
+	padding: 2px;
+	box-sizing: border-box;
+	border: none;
+	border-radius: 100px;
+	background: #cfd6df;
+	cursor: pointer;
+	transition: background 0.18s ease;
+}
+container-element.normal .configs .configs-body config-element .config-wrapper input[type='checkbox']:checked {
+	background: var(--ncp-primary);
+}
+container-element.normal .configs .configs-body config-element .config-wrapper input[type='checkbox']:disabled {
+	background: #e6e9ee;
+	cursor: not-allowed;
+}
+container-element.normal .configs .configs-body config-element .config-wrapper input[type='checkbox']::before {
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: #fff;
+	box-shadow: 0 1px 3px rgba(15, 23, 42, 0.3);
+	transition: transform 0.18s ease;
+}
+container-element.normal .configs .configs-body config-element .config-wrapper input[type='checkbox']:checked::before {
+	transform: translateX(16px);
+}
+
+/* 卡片里的多行输入框（手动搜题等） */
+container-element.normal .script-panel-body .card textarea {
+	width: 100% !important;
+	min-width: 0 !important;
+	max-width: 100%;
+	box-sizing: border-box;
+	margin: 0;
+	padding: 8px 10px;
+	border: 1px solid #dfe4ea;
+	border-radius: 8px;
+	background: #fff;
+	color: var(--ncp-text);
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.5;
+	outline: none;
+	resize: vertical;
+}
+container-element.normal .script-panel-body .card textarea:focus {
+	border-color: var(--ncp-primary);
+	box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.15);
+}
+container-element.normal .script-panel-body .card > div:first-child {
+	color: var(--ncp-text);
+}
+
+/* 请求记录 */
+.ncp-req-list {
+	overflow: auto;
+	border: 1px solid var(--ncp-border);
+	border-radius: 10px;
+	background: #fbfcfd;
+}
+.ncp-req-empty {
+	padding: 18px 0;
+	text-align: center;
+	color: #a0a8b4;
+	font-size: 12px;
+}
+.ncp-req-item {
+	padding: 8px 12px;
+	border-bottom: 1px solid #eef1f5;
+	font-size: 12px;
+	line-height: 1.6;
+}
+.ncp-req-item:last-child {
+	border-bottom: none;
+}
+.ncp-req-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.ncp-req-time {
+	flex: none;
+	color: #8a93a1;
+	font-variant-numeric: tabular-nums;
+}
+.ncp-req-method {
+	flex: none;
+	padding: 0 6px;
+	border-radius: 4px;
+	background: #e6f2ff;
+	color: #0c5bb0;
+	font-size: 11px;
+	font-weight: 600;
+}
+.ncp-req-dot {
+	flex: none;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #f0b429;
+}
+.ncp-req-dot.ok {
+	background: #2fb36d;
+}
+.ncp-req-dot.fail {
+	background: #e5534b;
+}
+.ncp-req-url {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ncp-text);
+}
+.ncp-req-body {
+	margin-top: 2px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: #8a93a1;
+}
+
+/* ==================== 弹窗与消息提示 ==================== */
+modal-element {
+	box-sizing: border-box;
+	max-width: calc(100vw - 32px);
+	max-height: calc(100vh - 32px);
+	display: flex;
+	flex-direction: column;
+	padding: 18px 22px 18px;
+	border: 1px solid #dfe4ea;
+	border-radius: 14px;
+	box-shadow: 0 24px 60px -20px rgba(15, 23, 42, 0.5);
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+	font-size: 13px;
+	line-height: 1.7;
+	color: #2b2f36;
+}
+modal-element .modal-profile {
+	display: none;
+}
+modal-element .modal-title {
+	flex: none;
+	font-size: 16px;
+	font-weight: 600;
+	color: #1f2937;
+}
+modal-element .modal-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	margin: 12px 0 14px;
+	overflow: auto;
+}
+modal-element .modal-footer {
+	flex: none;
+	align-items: center;
+	gap: 10px;
+}
+modal-element .modal-footer > * + * {
+	margin-left: 0;
+}
+modal-element .modal-cancel-button,
+modal-element .modal-confirm-button {
+	margin: 0;
+	padding: 6px 18px;
+	border-radius: 8px;
+	font-size: 13px;
+	font-family: inherit;
+	line-height: 1.4;
+}
+modal-element .modal-cancel-button {
+	border: 1px solid #dfe4ea;
+	background: #fff;
+	color: #4b5563;
+}
+modal-element .modal-cancel-button:hover {
+	background: #f3f5f8;
+}
+modal-element .modal-confirm-button {
+	border: 1px solid #1890ff;
+	background: #1890ff;
+	color: #fff;
+}
+modal-element .modal-confirm-button:hover {
+	background: #3aa0ff;
+}
+modal-element .modal-confirm-button.danger {
+	border-color: #e5534b;
+	background: #e5534b;
+	color: #fff;
+}
+modal-element .modal-confirm-button:disabled {
+	border-color: #dfe4ea;
+	background: #eef1f5;
+	color: #a0a8b4;
+}
+modal-element .modal-input {
+	padding: 6px 10px;
+	border: 1px solid #dfe4ea;
+	border-radius: 8px;
+	background: #fff;
+	font-family: inherit;
+	font-size: 13px;
+}
+modal-element .modal-input:focus {
+	border-color: #1890ff;
+	box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.15);
+}
+modal-element ul,
+modal-element ol {
+	line-height: 1.7;
+}
+modal-element .base-style-button,
+modal-element .base-style-button-secondary {
+	border-radius: 8px;
+	padding: 4px 12px;
+	font-size: 12px;
+	font-family: inherit;
+}
+modal-element input[type='text'],
+modal-element input[type='search'],
+modal-element select {
+	height: 30px;
+	box-sizing: border-box;
+	padding: 0 10px;
+	border: 1px solid #dfe4ea;
+	border-radius: 8px;
+	background: #fff;
+	font-family: inherit;
+	font-size: 12px;
+	outline: none;
+}
+.message-container message-element {
+	border-radius: 10px;
+	box-shadow: 0 8px 24px -12px rgba(15, 23, 42, 0.35);
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+}
+
+/* 悬停提示 */
+.tooltip-container {
+	max-width: 260px;
+	padding: 6px 10px;
+	border-radius: 8px;
+	background: #1f2937;
+	color: #f3f4f6;
+	box-shadow: 0 8px 24px -10px rgba(15, 23, 42, 0.5);
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+	font-size: 12px;
+	line-height: 1.6;
+	pointer-events: none;
+}
+
+/* ==================== 搜索结果与答案详情 ==================== */
+container-element.normal .search-infos-num {
+	width: 30px;
+	height: 26px;
+	line-height: 24px;
+	margin: 3px;
+	border-radius: 8px;
+	border: 1px solid #dfe4ea;
+	background: #fff;
+	color: #6b7482;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+	transition: transform 0.12s ease, background 0.12s ease;
+}
+container-element.normal .search-infos-num:hover {
+	transform: translateY(-1px);
+	border-color: #91c8ff;
+}
+container-element.normal .search-infos-num.requested {
+	border-color: #91c8ff;
+	background: #f0f7ff;
+	color: #0c5bb0;
+}
+container-element.normal .search-infos-num.finish {
+	border-color: #bfe6cf;
+	background: #e6f5ec;
+	color: #1b8a4c;
+}
+container-element.normal .search-infos-num.error {
+	border-color: #f3b8b4;
+	background: #fdeceb;
+	color: #c2362d;
+}
+container-element.normal .search-infos-num.active {
+	border-color: #1890ff;
+	background: #1890ff !important;
+	color: #fff;
+}
+container-element.normal .work-result-list {
+	max-height: 300px;
+	margin: 10px 0;
+	padding: 6px;
+	border: 1px solid var(--ncp-border);
+	border-radius: 12px;
+	background: #fff;
+}
+container-element.normal .search-info-title {
+	padding: 10px 14px;
+	margin-bottom: 10px;
+	border: 1px solid var(--ncp-border);
+	border-radius: 12px;
+	background: #fff;
+	line-height: 1.7;
+}
+container-element.normal search-infos-element .search-info-details {
+	margin-bottom: 8px;
+	padding: 8px 14px;
+	border: 1px solid var(--ncp-border);
+	border-radius: 12px;
+	background: #fff;
+}
+container-element.normal search-infos-element .search-info-details > summary {
+	cursor: pointer;
+	font-weight: 600;
+	color: var(--ncp-text);
+}
+container-element.normal search-infos-element .search-info-details > summary a {
+	color: inherit;
+	text-decoration: none;
+}
+container-element.normal search-infos-element .search-result {
+	margin: 8px 0 4px;
+	padding-left: 0;
+}
+container-element.normal search-infos-element .search-result .question {
+	font-weight: 500;
+}
+container-element.normal search-infos-element .search-result .answer {
+	margin-top: 2px;
+	color: #4b5563;
+}
+container-element.normal search-infos-element .search-result .answer code {
+	padding: 1px 6px;
+	border: none;
+	border-radius: 6px;
+	background: #e6f5ec;
+	color: #1b6b3d;
+	font-family: inherit;
+}
+container-element.normal search-infos-element .search-result .search-result-answer-tag {
+	border-radius: 6px;
+}
+container-element.normal search-infos-element .error {
+	padding-left: 0;
+	color: #c2362d;
+}
+container-element.normal .copy,
+container-element.normal .question-title-extra-btn {
+	padding: 2px 8px;
+	border: 1px solid #dfe4ea;
+	border-radius: 8px;
+	background: #fff;
+	box-shadow: none;
+	color: #4b5563;
+}
+container-element.normal .copy:hover,
+container-element.normal .question-title-extra-btn:hover {
+	background: #f3f5f8;
+}
 `;
 
 /* eslint-disable no-undef */
@@ -25081,7 +28191,7 @@ const infos = GM_info;
 		renderConfig: {
 			renderScript: RenderScript,
 			styles: [STYLE],
-			defaultPanelName: CommonProject.scripts.guide.namespace,
+			defaultPanelName: CommonProject.scripts.overview.namespace,
 			title: `南城派-全域名通用版-${infos.script.version}`
 		},
 		updatePage: ''

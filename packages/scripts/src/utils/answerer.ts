@@ -9,7 +9,8 @@ import { $, $message, $store } from 'easy-us';
 import md5 from 'md5';
 import { $searchConsole } from './logger';
 import { $debug } from './debug';
-import { isAnswerUsableForOptions, normalizeText, textSimilarity } from './option-match';
+import { beginBusy } from './task-state';
+import { hasValidOptionLetter, isAnswerUsableForOptions, normalizeText, textSimilarity } from './option-match';
 
 export type SearchScene = 'auto' | 'manual-single' | 'manual-batch';
 
@@ -1310,7 +1311,7 @@ function mergeOptionLabelLines(text: string) {
 	return merged.join('\n');
 }
 
-async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<SearchInformation | undefined> {
+async function searchAiQuestionInner(env: SearchEnv, scene: SearchScene): Promise<SearchInformation | undefined> {
 	const config = getAiConfig();
 	if (!config.enable) {
 		return undefined;
@@ -1728,6 +1729,19 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 	}
 }
 
+/** AI 搜题：期间窗口会显示“AI 思考中”（只有 AI 已开启时才会真正发起请求） */
+async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<SearchInformation | undefined> {
+	if (!getAiConfig().enable) {
+		return undefined;
+	}
+	const end = scene === 'auto' ? beginBusy('ai') : undefined;
+	try {
+		return await searchAiQuestionInner(env, scene);
+	} finally {
+		end?.();
+	}
+}
+
 /** 题库结果与题目的相似度低于该值时，认为是无关结果（题库模糊匹配经常返回不相关的题目） */
 const CREDIBLE_SIMILARITY = 0.5;
 /** 题库返回的“占位”答案，不能当作真正的答案 */
@@ -1783,6 +1797,10 @@ function hasCredibleResult(title: string, infos: SearchInformation[], optionsTex
 		.split('\n')
 		.map((line) => line.trim())
 		.filter(Boolean);
+	// 答案带有选项字母（AI / 缓存）时，即使文字对不上，也可以按字母选择
+	if (credible.some((result) => hasValidOptionLetter((result.extra_data as any)?.option, optionTexts.length))) {
+		return true;
+	}
 	return isAnswerUsableForOptions(
 		credible.map((result) => result.answer),
 		optionTexts
@@ -1827,9 +1845,13 @@ async function searchWrapperWithDeadline(wrapper: AnswererWrapper, env: SearchEn
 
 export async function searchAnswerInWrappers(wrappers: AnswererWrapper[], env: SearchEnv, scene: SearchScene = 'auto') {
 	// 所有题库并行搜索，总耗时取决于最慢的一个，而不是所有题库耗时相加
-	const infos: SearchInformation[] = await Promise.all(
-		wrappers.map((wrapper) => searchWrapperWithDeadline(wrapper, env, scene))
-	);
+	const endBusy = scene === 'auto' ? beginBusy('search') : undefined;
+	let infos: SearchInformation[];
+	try {
+		infos = await Promise.all(wrappers.map((wrapper) => searchWrapperWithDeadline(wrapper, env, scene)));
+	} finally {
+		endBusy?.();
+	}
 
 	// 所有题库都没有可信的结果（没有结果，或只有不相关/占位的答案）时，使用 AI 兜底
 	const credible = hasCredibleResult(String(env.title || ''), infos, String(env.options || ''));

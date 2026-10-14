@@ -5,12 +5,25 @@ import { findBestMatch, Rating } from 'string-similarity';
  * @param str
  * @returns
  */
+/** 统一 Unicode 写法：全角字符转半角，微符号 µ（U+00B5）转希腊字母 μ（U+03BC）等，看起来一样的字符才能匹配上 */
+function normalizeUnicode(str: string) {
+	try {
+		return str.normalize('NFKC');
+	} catch {
+		return str;
+	}
+}
+
 export function clearString(str: string, ...exclude: string[]) {
 	exclude.push(...['①②③④⑤⑥⑦⑧⑨']);
-	return str
-		.trim()
-		.toLocaleLowerCase()
-		.replace(RegExp(`[^\\u2E80-\\u9FFFA-Za-z0-9${exclude.join('')}]*`, 'g'), '');
+	const base = normalizeUnicode(str).trim().toLocaleLowerCase();
+	/**
+	 * 只保留中日韩文字、所有语言的字母和数字。
+	 * 以前只保留中文、英文字母和数字，导致希腊字母（λ ρ μ …）等理工科题目里常见的选项被清成空字符串，永远匹配不上。
+	 */
+	const cleaned = base.replace(RegExp(`[^\\u2E80-\\u9FFF\\p{L}\\p{N}${exclude.join('')}]+`, 'gu'), '');
+	// 选项本身全是符号时（例如 ≥ ≤ ± →），上面会得到空字符串，此时只去掉空白，保留符号用于比较
+	return cleaned || base.replace(/\s+/g, '');
 }
 
 /**
@@ -76,5 +89,9 @@ export function removeRedundant(str: string) {
 	// 只删除开头的选项标签（A. / A、 / A： / A) / “A”后面换行或空白再跟内容）。
 	// 旧实现没有锚定开头，会把内容中间的“大写字母 + 符号 + 字母”也删掉，
 	// 例如答案 “DW +DQ -DA” 被改成 “DDQ -DA”，而选项只去掉了标签，两边永远对不上。
-	return str?.trim().replace(/^[A-Z](?:\s*[.、:：．)）]\s*|\s+)(?=[A-Za-z0-9\u2E80-\u9FFF])/, '') || '';
+	return (
+		normalizeUnicode(str || '')
+			.trim()
+			.replace(/^[A-Z](?:\s*[.、:：．)）]\s*|\s+)(?=[A-Za-z0-9\u2E80-\u9FFF])/, '') || ''
+	);
 }

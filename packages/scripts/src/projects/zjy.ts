@@ -1,6 +1,7 @@
 import { $, OCSWorker } from '@ocsjs/core';
 import { Project, Script, $ui, $el, $message, $modal, h } from 'easy-us';
 import { isDebugEnabled } from '../utils/debug';
+import { attachMediaToTask, isUserPaused } from '../utils/task-state';
 import { volume } from '../utils/configs';
 import { waitForMedia, waitForElement } from '../utils/study';
 import { CommonWorkOptions, playMedia } from '../utils';
@@ -350,7 +351,9 @@ async function watchMedia() {
 	}
 
 	return new Promise<void>((resolve, reject) => {
+		const detach = attachMediaToTask(media, { platform: '职教云', onSkip: () => resolve() });
 		media.addEventListener('ended', () => {
+			detach();
 			resolve();
 		});
 
@@ -358,7 +361,7 @@ async function watchMedia() {
 			setTimeout(() => {
 				if (media.ended) {
 					resolve();
-				} else if (media.paused) {
+				} else if (media.paused && !isUserPaused()) {
 					media.play();
 					media.volume = parseFloat(ZJYProject.scripts.study.cfg.volume.toString());
 					media.playbackRate = parseFloat(ZJYProject.scripts.study.cfg.playbackRate.toString());

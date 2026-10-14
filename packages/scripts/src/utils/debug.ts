@@ -86,6 +86,13 @@ export const $debug = {
 	}
 };
 
+/** 切换试运行开关（窗口标题栏的“试运行”按钮使用） */
+export function toggleDryRun() {
+	const next = !isDryRun();
+	$store.set(DEBUG_STORE_KEYS.dryRun, next);
+	return next;
+}
+
 /**
  * 试运行拦截。
  * 在即将执行“提交 / 保存 / 跳转”这类不可逆操作之前调用：

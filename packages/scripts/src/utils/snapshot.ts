@@ -449,16 +449,16 @@ function tailLogs(namespace: string, count: number) {
 			.map((log) => ({
 				time: new Date(log.time).toISOString(),
 				type: log.type,
-				content: log.content,
-				detail: log.detail
+				content: redactLogText(log.content),
+				detail: log.detail ? redactLogText(log.detail) : undefined
 			}));
 	} catch {
 		return [];
 	}
 }
 
-function download(filename: string, content: string) {
-	const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+function download(filename: string, content: string, mime = 'application/json') {
+	const blob = new Blob([content], { type: `${mime};charset=utf-8` });
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;
@@ -576,6 +576,87 @@ export async function exportPageSnapshot(mode: SnapshotMode = 'structure') {
 		size: json.length,
 		truncated: frames.some((f) => f.truncated)
 	};
+}
+
+/** 日志文本里可能出现的凭证：请求体里的账号字段、令牌、密钥、链接里的身份参数 */
+const LOG_SECRET_KEYS = [
+	...['poolId', 'userId', 'user_id', 'tk_uid', 'tkUid', 'token', 'pp', 'apiKey', 'api_key', 'api-key'],
+	...['Authorization', 'x-api-key', 'enc', 'puid', 'uid', 'cpi', 'openc']
+];
+const LOG_SECRET_PATTERN = new RegExp(`("?(?:${LOG_SECRET_KEYS.join('|')})"?\\s*[:=]\\s*)("[^"]*"|[^\\s,&}"]+)`, 'gi');
+
+export function redactLogText(text: string) {
+	return String(text ?? '')
+		.replace(LOG_SECRET_PATTERN, (_, key: string, value: string) => {
+			return `${key}${value.startsWith('"') ? '"[redacted]"' : '[redacted]'}`;
+		})
+		.replace(/Bearer\s+[A-Za-z0-9._-]+/g, 'Bearer [redacted]')
+		.replace(/\bsk-[A-Za-z0-9]{8,}/g, 'sk-[redacted]');
+}
+
+type LogFormat = 'txt' | 'json';
+
+function readableTime(time: number) {
+	const d = new Date(time);
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+const LOG_TYPE_TEXT: Record<string, string> = { info: '信息', warn: '警告', error: '错误', debug: '调试', log: '日志' };
+
+/** 把一个日志面板里的日志整理成可读的文本（已脱敏），用于复制和导出 */
+export function formatPanelLogs(namespace: string, label: string) {
+	const logs = getPanelLogs(namespace);
+	const header = [
+		`${label}（共 ${logs.length} 条）`,
+		`导出时间：${new Date().toLocaleString()}`,
+		`页面：${redactUrl(location.href)}`,
+		''
+	];
+	const lines = logs.flatMap((log) => {
+		const rows = [`${readableTime(log.time)} [${LOG_TYPE_TEXT[log.type] || log.type}] ${redactLogText(log.content)}`];
+		if (log.detail) {
+			rows.push(
+				...redactLogText(log.detail)
+					.split('\n')
+					.map((row) => '    ' + row)
+			);
+		}
+		return rows;
+	});
+	return header.concat(lines).join('\n');
+}
+
+/** 导出某个日志面板的日志文件（txt 便于阅读，json 便于程序处理），内容已脱敏 */
+export function exportPanelLogFile(namespace: string, label: string, format: LogFormat = 'txt') {
+	const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+	const base = `ncp-${label.replace(/[^\u4e00-\u9fa5A-Za-z0-9]+/g, '')}-${stamp}`;
+	let content: string;
+	if (format === 'json') {
+		const infos = $gm.getInfos();
+		content = JSON.stringify(
+			{
+				kind: 'ncp-logs',
+				label,
+				createdAt: new Date().toISOString(),
+				script: { name: infos?.script?.name, version: infos?.script?.version },
+				page: redactUrl(location.href),
+				logs: getPanelLogs(namespace).map((log) => ({
+					time: new Date(log.time).toISOString(),
+					type: log.type,
+					content: redactLogText(log.content),
+					detail: log.detail ? redactLogText(log.detail) : undefined
+				}))
+			},
+			null,
+			1
+		);
+	} else {
+		content = formatPanelLogs(namespace, label);
+	}
+	const filename = `${base}.${format}`;
+	download(filename, content, format === 'json' ? 'application/json' : 'text/plain');
+	return { filename, size: content.length };
 }
 
 /** 导出调试日志（JSON 文件） */

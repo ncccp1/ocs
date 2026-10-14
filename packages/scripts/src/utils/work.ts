@@ -3,6 +3,7 @@ import { $ui, $message, MessageElement, Script, h, CommonEventEmitter, cors, $el
 import { CommonProject } from '../projects/common';
 import { CommonWorkOptions, workPreCheckMessage } from '.';
 import { searchAnswerInWrappers } from './answerer';
+import { getTaskState, onTaskCommand, onTaskStateChange, setTaskState, TASK_KIND_LABEL } from './task-state';
 
 export let globalControlPanel: HTMLElement | null = null;
 let globalFloatingBar: HTMLElement | null = null;
@@ -38,6 +39,11 @@ export function setWorkPaused(worker: CommonEventEmitter<WorkerEvents> | undefin
 	}
 	pausedWorkers.set(worker, paused);
 	worker.emit?.(paused ? 'stop' : 'continuate');
+	// 同步到窗口：圆点、标题栏显示“已暂停”
+	const state = getTaskState();
+	if (state.status === 'running' || state.status === 'paused') {
+		setTaskState({ status: paused ? 'paused' : 'running' });
+	}
 	pauseListeners.forEach((listener) => listener(worker, paused));
 }
 
@@ -59,7 +65,7 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 	getFloatingBarHost().getElementById(FLOATING_BAR_ID)?.remove();
 
 	// --- 开始/暂停按钮 ---
-	const pauseBtn = h('button', { style: { ...floatingBtnStyle, background: '#7c4dff' } }, '⏸ 暂停');
+	const pauseBtn = h('button', { style: { ...floatingBtnStyle, background: '#1890ff' } }, '⏸ 暂停');
 	pauseBtn.onclick = () => {
 		onStartPause();
 		pauseBtn.textContent = getState() ? '▶ 继续' : '⏸ 暂停';
@@ -72,10 +78,10 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 			flex: '1',
 			minWidth: '120px',
 			padding: '4px 8px',
-			border: '1px solid #555',
-			borderRadius: '12px',
-			background: '#222',
-			color: '#eee',
+			border: '1px solid #4b5563',
+			borderRadius: '14px',
+			background: '#1f2937',
+			color: '#f3f4f6',
 			fontSize: '12px',
 			outline: 'none'
 		}
@@ -90,18 +96,18 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 			width: '460px',
 			maxHeight: '400px',
 			overflowY: 'auto',
-			background: '#1a1a2e',
-			border: '1px solid #444',
-			borderRadius: '10px',
+			background: '#111827',
+			border: '1px solid #374151',
+			borderRadius: '12px',
 			padding: '10px',
-			boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+			boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
 			fontSize: '13px',
 			color: '#e0e0e0',
 			zIndex: '999999'
 		}
 	});
 
-	const searchBtn = h('button', { style: { ...floatingBtnStyle, background: '#00bfa5' } }, '搜索');
+	const searchBtn = h('button', { style: { ...floatingBtnStyle, background: '#2fb36d' } }, '搜索');
 	searchBtn.onclick = async () => {
 		const value = searchInput.value.trim();
 		if (!value) return;
@@ -217,6 +223,13 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 		applyCollapsed(collapsed);
 	};
 
+	// --- 当前任务和进度（与窗口标题栏、圆点一致） ---
+	const statusLabel = h(
+		'span',
+		{ style: { color: '#9ca3af', fontSize: '11px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } },
+		''
+	);
+
 	// --- 整体布局 ---
 	const bar = h(
 		'div',
@@ -230,16 +243,18 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 				display: 'flex',
 				gap: '6px',
 				padding: '6px 12px',
-				background: 'rgba(0,0,0,0.82)',
-				borderRadius: '24px',
-				boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+				background: 'rgba(17,24,39,0.94)',
+				borderRadius: '22px',
+				boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+				fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif",
 				alignItems: 'center',
 				flexWrap: 'wrap',
 				maxWidth: '480px'
 			}
 		},
 		[
-			h('span', { style: { color: '#aaa', fontSize: '11px', marginRight: '2px', fontWeight: 'bold' } }, '南城派'),
+			h('span', { style: { color: '#e5e7eb', fontSize: '12px', fontWeight: '600' } }, '南城派'),
+			statusLabel,
 			pauseBtn,
 			collapseBtn,
 			searchInput,
@@ -252,7 +267,7 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 	globalFloatingBar = bar;
 	const host = getFloatingBarHost();
 	(host.body || document.body).appendChild(bar);
-	return { bar, btn: pauseBtn };
+	return { bar, btn: pauseBtn, statusLabel };
 }
 
 /**
@@ -278,7 +293,34 @@ export function attachWorkFloatingBar(worker: CommonEventEmitter<WorkerEvents> |
 	};
 	pauseListeners.add(listener);
 
+	// 窗口标题栏 / 圆点上的 暂停 与 继续 按钮
+	const stopCommand = onTaskCommand((command) => {
+		if (command === 'pause') {
+			setWorkPaused(worker, true);
+		} else if (command === 'resume') {
+			setWorkPaused(worker, false);
+		}
+	});
+
+	// 标题栏同步：章节测验 · 3/5
+	const updateLabel = () => {
+		const state = getTaskState();
+		const running = state.status === 'running' || state.status === 'paused' || state.status === 'attention';
+		const parts: string[] = [];
+		if (running) {
+			parts.push(TASK_KIND_LABEL[state.kind] || '');
+			if ((state.total || 0) > 0) {
+				parts.push(`${Math.min(state.current || 0, state.total || 0)}/${state.total}`);
+			}
+		}
+		control.statusLabel.textContent = parts.filter(Boolean).join(' · ');
+	};
+	const stopState = onTaskStateChange(updateLabel);
+	updateLabel();
+
 	const remove = () => {
+		stopCommand();
+		stopState();
 		pauseListeners.delete(listener);
 		control.bar.remove();
 		if (globalFloatingBar === control.bar) {

@@ -1,6 +1,7 @@
 import { $, OCSWorker, RemotePage } from '@ocsjs/core';
 import { $message, Project, Script, $ui, $store } from 'easy-us';
 import { isDebugEnabled } from '../utils/debug';
+import { attachMediaToTask, isUserPaused } from '../utils/task-state';
 import { CommonWorkOptions, playMedia } from '../utils';
 import { searchAnswerInWrappers } from '../utils/answerer';
 import { CommonProject } from './common';
@@ -637,15 +638,17 @@ async function watchMedia(playbackRate: number, volume: number) {
 
 				state.currentMedia = video;
 
+				const detach = attachMediaToTask(video, { platform: '中国大学MOOC', onSkip: () => resolve() });
 				playMedia(() => video?.play());
 
 				video.onpause = async () => {
-					if (!video?.ended) {
+					if (!video?.ended && !isUserPaused()) {
 						video?.play();
 					}
 				};
 
 				video.onended = () => {
+					detach();
 					resolve();
 				};
 			})

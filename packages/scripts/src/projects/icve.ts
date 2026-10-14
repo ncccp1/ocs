@@ -1,6 +1,7 @@
 import { $, SimplifyWorkResult, OCSWorker, createDefaultQuestionResolver, splitAnswer } from '@ocsjs/core';
 import { $gm, cors, $message, $$el, $modal, $el, Project, Script, $ui, h } from 'easy-us';
 import { isDebugEnabled } from '../utils/debug';
+import { attachMediaToTask, isUserPaused } from '../utils/task-state';
 import { playbackRate, restudy, volume } from '../utils/configs';
 import { CommonWorkOptions, playMedia } from '../utils';
 import { searchAnswerInWrappers } from '../utils/answerer';
@@ -336,8 +337,9 @@ export const IcveMoocProject = Project.create({
 											resolve();
 										});
 
+										attachMediaToTask(media, { platform: '智慧职教', onSkip: () => resolve() });
 										media.addEventListener('pause', async () => {
-											if (!media.ended) {
+											if (!media.ended && !isUserPaused()) {
 												await Promise.race([
 													// 测验弹窗
 													waitForPopupQuestion(doc),
@@ -736,7 +738,9 @@ async function watchMedia() {
 	}
 
 	return new Promise<void>((resolve, reject) => {
+		const detach = attachMediaToTask(media, { platform: '智慧职教', onSkip: () => resolve() });
 		media.addEventListener('ended', () => {
+			detach();
 			resolve();
 		});
 
@@ -744,7 +748,7 @@ async function watchMedia() {
 			setTimeout(() => {
 				if (media.ended) {
 					resolve();
-				} else if (media.paused) {
+				} else if (media.paused && !isUserPaused()) {
 					media.play();
 					media.volume = parseFloat(IcveMoocProject.scripts['ai-study'].cfg.volume.toString());
 					media.playbackRate = parseFloat(IcveMoocProject.scripts['ai-study'].cfg.playbackRate.toString());

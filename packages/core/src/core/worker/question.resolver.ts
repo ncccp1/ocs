@@ -20,6 +20,22 @@ export function createDefaultQuestionResolver<E>(
 				.flat();
 			const optionStrings = options.map((o) => removeRedundant(o.innerText));
 			let ratings: Rating[] = [];
+
+			// 本次刚返回的答案（AI）附带了所选选项的字母：这个字母就是针对当前选项给出的，直接选择；
+			// 来自缓存的答案不走这里，先按内容匹配，匹配不到再退回字母（见下方）
+			for (const info of infos) {
+				for (const res of info.results) {
+					const extra = res.extra_data as { option?: string; cache?: boolean } | undefined;
+					const letter = String(extra?.option || '')
+						.trim()
+						.toUpperCase();
+					if (!extra?.cache && /^[A-H]$/.test(letter) && options[letter.charCodeAt(0) - 65] !== undefined) {
+						const target = options[letter.charCodeAt(0) - 65];
+						await handler('single', target.innerText, target, ctx);
+						return { finish: true, option: target };
+					}
+				}
+			}
 			if (ctx.answerMatchMode === 'similar') {
 				/** 配对选项的相似度 */
 				ratings = answerSimilar(allAnswer, optionStrings);
@@ -69,6 +85,20 @@ export function createDefaultQuestionResolver<E>(
 				}
 			}
 
+			// 答案附带了所选选项的字母（AI 答题会同时返回选项字母和内容）：文字匹配不上时直接按字母选择
+			for (const info of infos) {
+				for (const res of info.results) {
+					const letter = String((res.extra_data as { option?: string } | undefined)?.option || '')
+						.trim()
+						.toUpperCase();
+					if (/^[A-H]$/.test(letter) && options[letter.charCodeAt(0) - 65] !== undefined) {
+						const target = options[letter.charCodeAt(0) - 65];
+						await handler('single', target.innerText, target, ctx);
+						return { finish: true, option: target };
+					}
+				}
+			}
+
 			return { finish: false, allAnswer, ratings: ratings.map((r) => r.rating), options: optionStrings };
 		},
 		/**
@@ -99,6 +129,30 @@ export function createDefaultQuestionResolver<E>(
 			const exact_list: HTMLElement[][] = [];
 
 			const results = infos.map((info) => info.results).flat();
+
+			// 本次刚返回的答案（AI）附带了所选选项的字母（如 AC）：直接按字母选择；
+			// 来自缓存的答案先按内容匹配，匹配不到再退回字母（见下方）
+			for (const result of results) {
+				const extra = result.extra_data as { option?: string; cache?: boolean } | undefined;
+				if (extra?.cache) {
+					continue;
+				}
+				const letters = Array.from(
+					new Set(
+						String(extra?.option || '')
+							.toUpperCase()
+							.replace(/[^A-H]/g, '')
+							.split('')
+					)
+				);
+				const targets = letters.map((char) => options[char.charCodeAt(0) - 65]).filter(Boolean);
+				if (targets.length && targets.length === letters.length) {
+					for (const target of targets) {
+						await handler('multiple', target.innerText, target, ctx);
+					}
+					return { finish: true, plainOptions: targets };
+				}
+			}
 
 			/**
 			 * 遍历题库结果
@@ -212,6 +266,26 @@ export function createDefaultQuestionResolver<E>(
 						}
 						await handler('multiple', options[index].innerText, options[index], ctx);
 						plainOptions.push(options[index]);
+					}
+				}
+			}
+
+			// 答案附带了所选选项的字母（例如 AC）：文字匹配不上时直接按字母选择
+			if (plainOptions.length === 0) {
+				for (const result of results) {
+					const letters = String((result.extra_data as { option?: string } | undefined)?.option || '')
+						.toUpperCase()
+						.replace(/[^A-H]/g, '');
+					for (const char of Array.from(new Set(letters.split('')))) {
+						const target = options[char.charCodeAt(0) - 65];
+						if (target === undefined) {
+							continue;
+						}
+						await handler('multiple', target.innerText, target, ctx);
+						plainOptions.push(target);
+					}
+					if (plainOptions.length) {
+						break;
 					}
 				}
 			}

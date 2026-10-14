@@ -19,6 +19,7 @@ import {
 	cleanBlankAnswer,
 	cleanQuestionStem,
 	inferChoiceType,
+	hasValidOptionLetter,
 	isBlankAnswerJunk,
 	isAnswerUsableForOptions,
 	matchAnswerToOptions,
@@ -39,6 +40,8 @@ import {
 	DEFAULT_AI_MAX_WAIT_SECONDS
 } from '../utils/answerer';
 import { $debug } from '../utils/debug';
+import { renderOverview } from '../utils/overview';
+import { icon } from '../utils/icons';
 
 const TAB_WORK_RESULTS_KEY = 'common.work-results.results';
 const PROJECT_NAME = '南城派网课助手';
@@ -829,25 +832,25 @@ export const CommonProject = Project.create({
 	name: '通用',
 	domains: [],
 	scripts: {
+		overview: new Script({
+			name: '📊 总览',
+			namespace: 'common.overview',
+			matches: [['所有页面', /.*/]],
+			onrender({ panel }) {
+				renderOverview(panel);
+			}
+		}),
 		guide: new Script({
 			name: '🏠 使用教程',
 			matches: [['所有页面', /.*/]],
 			namespace: 'common.guide',
 			configs: {
 				notes: {
-					defaultValue: $ui.notes([
-						'打开任意网课平台，进入视频、作业页面等待脚本运行，',
-						'如遇问题请通过项目主页或问题反馈页面提交截图说明。',
-						'温馨提示: ',
-						'⚠️ 禁止与其他脚本一起使用，否则会不兼容导致无法运行！',
-						'⚠️ 禁止最小化浏览器、切屏，否则可能导致脚本无法运行！'
-					]).outerHTML
+					defaultValue: ''
 				}
 			},
 			onrender({ panel }) {
-				const guide = createGuide();
-				guide.style.width = '480px';
-				panel.body.replaceChildren(guide);
+				panel.body.replaceChildren(createGuide());
 			}
 		}),
 		settings: new Script({
@@ -1198,6 +1201,7 @@ export const CommonProject = Project.create({
 					}
 				},
 				metoServer: {
+					separator: 'MeTo 题库',
 					label: 'MeTo 服务地址',
 					defaultValue: 'https://m.metst.cn',
 					attrs: {
@@ -1266,6 +1270,7 @@ export const CommonProject = Project.create({
 					}
 				},
 				aiEnable: {
+					separator: 'AI 兜底答题',
 					label: 'AI 兜底答题',
 					defaultValue: false,
 					attrs: {
@@ -1355,6 +1360,7 @@ export const CommonProject = Project.create({
 					}
 				},
 				upload: {
+					separator: '答题方式',
 					label: '答题完成后',
 					tag: 'select',
 					defaultValue: 80 as WorkUploadType,
@@ -1925,7 +1931,8 @@ export const CommonProject = Project.create({
 					 */
 					createWorkResultsPanel: (mount?: HTMLElement) => {
 						const root = mount || h('div');
-						root.style.width = '400px';
+						// 挂载到面板里时撑满内容区；独立使用时保持固定宽度
+						root.style.width = mount ? '100%' : '400px';
 						const container = h('div');
 						root.replaceChildren(createManualSearchEntry(), container);
 						/** 记录滚动高度 */
@@ -2207,7 +2214,7 @@ export const CommonProject = Project.create({
 				};
 			},
 			onrender({ panel }) {
-				panel.body.replaceChildren(this.methods.createWorkResultsPanel());
+				panel.body.replaceChildren(this.methods.createWorkResultsPanel(h('div')));
 			}
 		}),
 		onlineSearch: new Script({
@@ -2488,9 +2495,11 @@ export const CommonProject = Project.create({
 							caches = sameScopeCaches;
 						}
 
-						// 缓存答案与当前选项都对不上（例如过去被模糊搜索污染的缓存）：忽略并清除这些缓存，重新搜索
+						// 缓存答案与当前选项都对不上（例如过去被模糊搜索污染的缓存）：忽略并清除这些缓存，重新搜索。
+						// 缓存记录了所选选项的字母时，文字对不上也可以按字母选择，不清除
 						if (
 							caches.length &&
+							!caches.some((c) => hasValidOptionLetter(c.option, optionTexts.length)) &&
 							!isAnswerUsableForOptions(
 								caches.map((c) => c.answer),
 								optionTexts
@@ -2913,27 +2922,36 @@ export const CommonProject = Project.create({
 					)
 				);
 
-				[cachesBtn, exportSetting, importSetting].forEach((btn) => {
-					btn.onmouseover = () => {
-						btn.style.boxShadow = '0px 0px 4px #0099ff9c';
-					};
-					btn.onmouseout = () => {
-						btn.style.boxShadow = '0px 0px 4px #bebebe';
-					};
-				});
+				/** 把原有的按钮元素改造成统一样式的“操作行”，保留它们各自的点击处理 */
+				const action = (el: HTMLElement, iconName: string, title: string, desc: string) => {
+					el.removeAttribute('style');
+					el.onmouseover = null;
+					el.onmouseout = null;
+					el.className = 'ncp-action';
+					el.innerHTML =
+						`<span class="ncp-action-icon">${icon(iconName, 18)}</span>` +
+						`<span class="ncp-action-text"><b>${title}</b><small>${desc}</small></span>` +
+						`<span class="ncp-action-go">${icon('chevron', 16)}</span>`;
+					return el;
+				};
 
-				const sep = (text: string) => h('div', { className: 'separator', style: { padding: '4px 0px' } }, text);
+				const group = (text: string) => h('div', { className: 'ncp-group-title' }, text);
 
 				panel.body.replaceChildren(
-					h('div', [
-						sep('题库拓展'),
-						cachesBtn,
-						sep('设置备份与迁移'),
-						exportSetting,
-						importSetting,
+					h('div', { className: 'ncp-actions' }, [
+						group('题库'),
+						action(cachesBtn, 'database', '题库缓存', '查看、搜索、导出和导入长期保存的题库答案'),
+						group('设置备份与迁移'),
+						action(
+							exportSetting,
+							'download',
+							'导出设置',
+							'把全局设置、题库配置、学习设置保存为文件，可选择是否包含题库缓存和密钥'
+						),
+						action(importSetting, 'upload', '导入设置', '从设置文件恢复，导入前会显示内容概要并让你确认'),
 						h(
 							'div',
-							{ style: { fontSize: '12px', opacity: '0.75', padding: '4px 8px', lineHeight: '1.6' } },
+							{ className: 'ncp-hint' },
 							'换电脑、换浏览器、重装脚本或升级前先“导出设置”，在新版本里“导入设置”即可恢复；脚本自动更新不会丢失设置。'
 						)
 					])
@@ -3081,49 +3099,72 @@ const createGuide = () => {
 		});
 	};
 
-	const gotoHome = h('button', { className: 'base-style-button-secondary' }, '🏡项目主页');
-	gotoHome.onclick = () => window.open(PROJECT_REPO, '_blank');
-
-	const contactUs = h('button', { className: 'base-style-button-secondary' }, '🗨️问题反馈');
-	contactUs.onclick = () => window.open(PROJECT_ISSUES, '_blank');
-
-	const changeLog = h('button', { className: 'base-style-button-secondary' }, '📄更新日志');
-	changeLog.onclick = () => CommonProject.scripts.apps.methods.showChangelog();
-
-	const cardStyle: Partial<CSSStyleDeclaration> = {
-		border: '1px solid #eee',
-		borderRadius: '4px',
-		padding: '8px',
-		paddingTop: '4px'
+	const link = (text: string, onClick: () => void, primary = false) => {
+		const btn = h('button', { className: primary ? 'base-style-button' : 'base-style-button-secondary' }, text);
+		btn.onclick = onClick;
+		return btn;
 	};
 
-	return h('div', { className: 'user-guide' }, [
-		h('div', { className: 'notes card', style: { ...cardStyle, marginBottom: '12px' } }, [
-			`${PROJECT_NAME} 基于 OCSJS 二次开发，如需查看说明或反馈问题，请使用下方快捷入口。`
-		]),
-		h('div', { style: cardStyle }, [
-			h('div', { style: { marginBottom: '4px', fontWeight: 'bold' } }, [
-				'✨兼容的网课平台：',
-				h('span', { className: 'secondary', style: { fontWeight: 'normal' } }, '（未适配的平台将无法运行，请等待适配）')
-			]),
+	const step = (index: number, title: string, desc: string, action?: HTMLElement) =>
+		h('div', { className: 'gd-step' }, [
+			h('span', { className: 'gd-step-n' }, String(index)),
+			h('div', { className: 'gd-step-body' }, [h('b', title), h('div', { className: 'gd-step-desc' }, desc)]),
+			action || ''
+		]);
 
-			h('div', [
-				...[CXProject, ZHSProject, ZJYProject, IcveMoocProject, ICourseProject].map((project) => {
-					const btn = h('button', { className: 'base-style-button-secondary', style: { margin: '4px' } }, [
-						project.name
-					]);
-					btn.onclick = () => {
-						showProjectDetails(project);
-					};
-					return btn;
-				})
-			])
+	return h('div', { className: 'user-guide gd' }, [
+		h('div', { className: 'gd-hero' }, [
+			h('div', { className: 'gd-hero-title' }, `欢迎使用${PROJECT_NAME}`),
+			h('div', { className: 'gd-hero-sub' }, '基于 OCSJS 二次开发，自动完成网课的视频学习、章节测验、作业与考试。')
 		]),
-		h('div', { style: { ...cardStyle, marginTop: '12px' } }, [
-			h('div', { style: { marginBottom: '8px', fontWeight: 'bold' } }, '🌐快捷访问：'),
-			gotoHome,
-			contactUs,
-			changeLog
+
+		h('div', { className: 'gd-section' }, '三步开始'),
+		h('div', { className: 'gd-steps' }, [
+			step(
+				1,
+				'配置题库',
+				'在“全局设置”里填写题库（推荐 MeTo），或者开启 AI 兜底答题。没有题库也可以只刷视频。',
+				link('去设置', () => CommonProject.scripts.render.methods.pin(CommonProject.scripts.settings), true)
+			),
+			step(2, '打开网课页面', '进入课程学习、章节测验、作业或考试页面，脚本会自动运行，不需要额外操作。'),
+			step(
+				3,
+				'在总览里查看进度',
+				'随时可以暂停、跳过或试运行；窗口收起后只剩一个小圆点，悬停即可看到进度。',
+				link('打开总览', () => CommonProject.scripts.render.methods.pin(CommonProject.scripts.overview))
+			)
+		]),
+
+		h('div', { className: 'gd-section' }, [
+			'已适配的平台',
+			h('span', { className: 'gd-section-sub' }, '点击查看每个平台的脚本和运行页面')
+		]),
+		h(
+			'div',
+			{ className: 'gd-platforms' },
+			[CXProject, ZHSProject, ZJYProject, IcveMoocProject, ICourseProject].map((project) => {
+				const btn = h('button', { className: 'gd-platform' }, project.name);
+				btn.onclick = () => showProjectDetails(project);
+				return btn;
+			})
+		),
+
+		h('div', { className: 'gd-section' }, '使用前请注意'),
+		h('div', { className: 'gd-tips' }, [
+			h('div', { className: 'gd-tip' }, '禁止与其他网课脚本一起使用，否则会因为不兼容而无法运行。'),
+			h(
+				'div',
+				{ className: 'gd-tip' },
+				'请不要最小化浏览器或者切换到其他标签页，否则视频可能会暂停、脚本可能停止运行。'
+			),
+			h('div', { className: 'gd-tip' }, '遇到验证码或人脸识别时，需要你手动完成，脚本会自动等待。')
+		]),
+
+		h('div', { className: 'gd-section' }, '更多'),
+		h('div', { className: 'gd-links' }, [
+			link('项目主页', () => window.open(PROJECT_REPO, '_blank')),
+			link('问题反馈', () => window.open(PROJECT_ISSUES, '_blank')),
+			link('更新日志', () => CommonProject.scripts.apps.methods.showChangelog())
 		])
 	]);
 };

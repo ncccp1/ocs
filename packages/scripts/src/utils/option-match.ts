@@ -10,7 +10,14 @@ const WRONG_WORDS = ['错', '错误', '×', 'x', 'false', 'f', '否', 'no', '错
 
 /** 去掉标点、空白、HTML 标签并转小写，用于文字比较 */
 export function normalizeText(text: string) {
-	return String(text || '')
+	let value = String(text || '');
+	try {
+		// 统一 Unicode 写法：微符号 µ（U+00B5）与希腊字母 μ（U+03BC）看起来一样，必须当作同一个字符
+		value = value.normalize('NFKC');
+	} catch {
+		// 不支持 normalize 的环境保持原样
+	}
+	return value
 		.replace(/<[^>]+>/g, '')
 		.replace(/[\s。．.、,，;；:：!！?？"'“”（）()【】[\]]/g, '')
 		.toLowerCase();
@@ -182,6 +189,21 @@ export function cleanQuestionStem(stem: string) {
 		.replace(/^\s*\d+\s*[.、．]\s*/, '')
 		.replace(/^\s*\d*\s*[【[(（]?\s*(?:单选题|多选题|判断题|填空题|简答题|选择题|问答题|名词解释)\s*[】\])）]\s*/, '')
 		.trim();
+}
+
+/**
+ * 结果附带的选项字母（如 B、AC）是否都落在当前选项范围内。
+ * AI 答题和题库缓存会记录所选选项的字母：文字匹配不上时，答题器会退回到按字母选择，这样的答案同样可用。
+ */
+export function hasValidOptionLetter(option: unknown, optionCount: number) {
+	const letters = String(option || '')
+		.toUpperCase()
+		.replace(/[^A-H]/g, '');
+	return (
+		optionCount >= 2 &&
+		letters.length > 0 &&
+		Array.from(letters).every((letter) => letter.charCodeAt(0) - 65 < optionCount)
+	);
 }
 
 /**

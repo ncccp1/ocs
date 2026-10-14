@@ -1,6 +1,6 @@
 {
 	"name": "nanchengpai-course-helper",
-	"version": "4.12.46",
+	"version": "4.12.47",
 	"description": "南城派网课助手，基于 OCSJS 二次开发的网课辅助项目",
 	"types": "./lib/src/core/index.d.ts",
 	"main": "./lib/src/core/index.js",
@@ -12,6 +12,7 @@
 		"dev": "gulp -f ./scripts/dev-core.js & npm run changelog:simplify",
 		"build": "gulp -f ./scripts/build-core.js",
 		"mock:answerer": "node scripts/mock-answerer-server.js",
+		"ui:preview": "node scripts/ui-preview.js",
 		"mock:answerer:smoke": "node scripts/mock-answerer-server.smoke.js",
 		"tsc": "pnpm lint && gulp -f ./scripts/tsc.js",
 		"lint": "pnpm format && eslint  ./packages --ext .ts,.tsx,.js,.jsx --fix",

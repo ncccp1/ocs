@@ -1,5 +1,6 @@
 import { $ui, Project, Script, $el, h, $$el, $message, $, $modal, MessageElement, $store, $gm } from 'easy-us';
 import { isDebugEnabled } from '../utils/debug';
+import { attachMediaToTask, beginBusy, isUserPaused } from '../utils/task-state';
 import { RemotePage, SimplifyWorkResult, OCSWorker } from '@ocsjs/core';
 import { CommonProject } from './common';
 import { searchAnswerInWrappers } from '../utils/answerer';
@@ -1283,6 +1284,13 @@ export const ZHSProject = Project.create({
 								return;
 							}
 
+							attachMediaToTask(video, {
+								platform: '知到智慧树',
+								onSkip: () => {
+									next();
+								}
+							});
+
 							playMedia(() => video?.play()).then(() => {
 								$store.setTab('reload-count', 0);
 								const cn = getChapterName();
@@ -1780,6 +1788,13 @@ export const ZHSProject = Project.create({
 						return;
 					}
 
+					attachMediaToTask(video, {
+						platform: '知到智慧树',
+						onSkip: () => {
+							next();
+						}
+					});
+
 					// 如果视频元素无法访问，证明已经切换了视频
 					const videoCheckInterval = setInterval(async () => {
 						if (!video?.isConnected) {
@@ -1805,7 +1820,7 @@ export const ZHSProject = Project.create({
 					});
 
 					video.onpause = async () => {
-						if (!video?.isConnected) return;
+						if (!video?.isConnected || isUserPaused()) return;
 						if (!video?.ended && state.study.stop === false) {
 							await $.sleep(1000);
 							video?.play();
@@ -2005,6 +2020,13 @@ export const ZHSProject = Project.create({
 						return;
 					}
 
+					attachMediaToTask(video, {
+						platform: '知到智慧树',
+						onSkip: () => {
+							next();
+						}
+					});
+
 					// 如果视频元素无法访问，证明已经切换了视频
 					const videoCheckInterval = setInterval(async () => {
 						if (!video?.isConnected) {
@@ -2026,7 +2048,7 @@ export const ZHSProject = Project.create({
 					});
 
 					video.onpause = async () => {
-						if (!video?.isConnected) return;
+						if (!video?.isConnected || isUserPaused()) return;
 						if (!video?.ended && state.study.stop === false) {
 							await $.sleep(1000);
 							video?.play();
@@ -2166,6 +2188,15 @@ async function watch(
 		return await reload('视频加载失败');
 	}
 
+	// 上报进度，并让窗口的 暂停 / 继续 / 跳过 按钮对这个视频生效
+	const detachTask = attachMediaToTask(video, {
+		platform: '知到智慧树',
+		onSkip: () => {
+			detachTask();
+			actions.onended({ next: true });
+		}
+	});
+
 	const videoCheckInterval = setInterval(async () => {
 		// 如果视频元素无法访问，证明已经切换了视频
 		if (video?.isConnected === false) {
@@ -2184,6 +2215,9 @@ async function watch(
 	});
 
 	video.onpause = async () => {
+		if (isUserPaused()) {
+			return;
+		}
 		if (!video?.ended && state.study.stop === false) {
 			await waitForCaptcha();
 			await $.sleep(1000);
@@ -2192,6 +2226,7 @@ async function watch(
 	};
 
 	video.onended = () => {
+		detachTask();
 		clearInterval(videoCheckInterval);
 		// 正常切换下一个视频
 		actions.onended({ next: true });
@@ -2207,10 +2242,14 @@ async function watchXnk(options: { volume: number }, onended: () => void) {
 	media.volume = options.volume;
 	media.currentTime = 1;
 	state.study.currentMedia = media;
+	attachMediaToTask(media, { platform: '知到智慧树' });
 
 	playMedia(() => media?.play());
 
 	media.onpause = async () => {
+		if (isUserPaused()) {
+			return;
+		}
 		if (!media?.ended) {
 			await $.sleep(1000);
 			media?.play();
@@ -2259,6 +2298,7 @@ function waitForCaptcha(): void | Promise<void> {
 	const popup = getPopupCaptcha();
 	if (popup) {
 		const message = $message.warn({ content: '当前检测到验证码，请输入后方可继续运行。', duration: 0 });
+		const endBusy = beginBusy('captcha', '需要完成验证码');
 		CommonProject.scripts.settings.methods.notificationBySetting(
 			'智慧树脚本：当前检测到验证码，请输入后方可继续运行。',
 			{ duration: 0 }
@@ -2269,6 +2309,7 @@ function waitForCaptcha(): void | Promise<void> {
 				const popup = getPopupCaptcha();
 				if (popup === null) {
 					message?.remove();
+					endBusy();
 					clearInterval(interval);
 					resolve();
 				}

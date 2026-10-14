@@ -27,6 +27,17 @@ import {
 } from '../utils/work';
 import { $debug, isDebugEnabled, skipInDryRun } from '../utils/debug';
 import { registerSnapshotCollector } from '../utils/snapshot';
+import {
+	beginBusy,
+	finishTask,
+	isUserPaused,
+	registerMediaControl,
+	resetTaskSteps,
+	setTaskState,
+	trackMediaProgress,
+	updateTaskFromResults,
+	upsertTaskStep
+} from '../utils/task-state';
 import md5 from 'md5';
 // @ts-ignore
 import Typr from 'typr.js';
@@ -950,6 +961,10 @@ function workOrExam(type: 'work' | 'exam' = 'work', options: WorkOrExamOptions) 
 
 		/** 完成答题后 */
 		async onResultsUpdate(current, _, res) {
+			updateTaskFromResults(res, {
+				kind: type === 'exam' ? 'exam' : 'homework',
+				title: document.title.trim() || (type === 'exam' ? '考试' : '作业')
+			});
 			// 非预览模式，直接追加，想要清楚只能手动清空
 			if (!preview_mode) {
 				if (current.result?.finish) {
@@ -1370,6 +1385,8 @@ export async function study(
 	await $.sleep(3000);
 
 	const searchedJobs: Job[] = [];
+	resetTaskSteps();
+	setTaskState({ platform: '超星学习通' });
 
 	let searching = true;
 
@@ -1392,9 +1409,13 @@ export async function study(
 		const job = searchJob(opts, searchedJobs);
 		// 如果存在任务点
 		if (job && job.func) {
+			const stepId = String(job.mid);
+			upsertTaskStep({ id: stepId, status: 'running' });
 			try {
 				await job.func();
+				upsertTaskStep({ id: stepId, status: 'done' });
 			} catch (e) {
+				upsertTaskStep({ id: stepId, status: 'error' });
 				$console.error('未知错误', e);
 			}
 
@@ -1420,6 +1441,15 @@ export async function study(
 	};
 
 	await runJobs();
+	// 本页任务点都处理完了，接下来是跳转：保持“运行中”，避免窗口显示成待机
+	setTaskState({
+		kind: 'other',
+		status: 'running',
+		title: '本页任务点已处理完，正在跳转',
+		progress: 1,
+		busy: undefined,
+		canSkip: false
+	});
 	$debug.log('cx.study', '任务点处理结束', {
 		searched: searchedJobs.length,
 		attachmentTotal,
@@ -1503,6 +1533,7 @@ export async function study(
 					.map((el) => el.element.parentElement as HTMLElement);
 				if (elements.length === 0) {
 					const content = '全部任务点已完成！';
+					finishTask(content);
 					$modal.alert({ content: content });
 					CommonProject.scripts.settings.methods.notificationBySetting(content, {
 						duration: 0,
@@ -1613,6 +1644,7 @@ export async function study(
 		});
 	} else {
 		const msg = '页面任务点已完成，自动跳转已关闭，请手动跳转。';
+		finishTask('本页已完成，请手动跳转');
 		$message.warn({ content: msg, duration: 0 });
 		$console.warn(msg);
 	}
@@ -1826,7 +1858,7 @@ function searchJob(
 										const msg = `开始答题 : ` + jobName;
 										$message.info({ content: msg });
 										$console.log(msg);
-										return JobRunner.chapter(root, latestWorkOptions);
+										return JobRunner.chapter(root, latestWorkOptions, jobName);
 									};
 								}
 							}
@@ -1852,6 +1884,14 @@ function searchJob(
 								const msg = `正在学习 : ` + jobName;
 								$message.info({ content: msg });
 								$console.log(msg);
+								setTaskState({
+									kind: 'document',
+									status: 'running',
+									title: jobName,
+									platform: '超星学习通',
+									progress: null,
+									canSkip: false
+								});
 								if (read) {
 									return JobRunner.read(win);
 								} else {
@@ -1871,6 +1911,14 @@ function searchJob(
 								const msg = `正在完成链接阅读任务 : ` + jobName;
 								$message.info({ content: msg });
 								$console.log(msg);
+								setTaskState({
+									kind: 'document',
+									status: 'running',
+									title: jobName,
+									platform: '超星学习通',
+									progress: null,
+									canSkip: false
+								});
 								return JobRunner.hyperlink(hyperlink);
 							};
 						}
@@ -1883,6 +1931,21 @@ function searchJob(
 					work_type,
 					retryLater,
 					mid: attachment.property.mid
+				});
+
+				const stepKind = videojs
+					? (videojs as HTMLElement).id === 'audio'
+						? 'audio'
+						: 'video'
+					: chapterTest
+					? 'quiz'
+					: 'document';
+				upsertTaskStep({
+					id: String(attachment.property.mid),
+					kind: stepKind,
+					title: jobName,
+					status: func ? 'pending' : work_type === 'finished' ? 'done' : 'skipped',
+					note: func ? undefined : work_type === 'finished' ? '已完成' : '未执行'
 				});
 
 				const job = {
@@ -2071,6 +2134,15 @@ const JobRunner = {
 		// @ts-ignore
 		top.currentMedia = media;
 
+		// 上报任务状态：窗口的圆点、标题栏、总览页都读取这份数据
+		const mediaKind = (videojs as HTMLElement).id === 'audio' ? 'audio' : 'video';
+		const stopTrack = trackMediaProgress(media, {
+			kind: mediaKind,
+			title: videoName,
+			platform: '超星学习通',
+			canSkip: true
+		});
+
 		// 固定视频进度
 		fixedVideoProgress();
 
@@ -2147,8 +2219,16 @@ const JobRunner = {
 				clearInterval(reloadInterval);
 				clearInterval(stallInterval);
 				media.removeEventListener('pause', playFunction);
+				stopTrack();
+				stopControl();
 				action();
 			};
+
+			// 窗口上的 暂停 / 继续 / 跳过 按钮
+			const stopControl = registerMediaControl(media, () => {
+				$console.info('已跳过当前视频。');
+				finish(() => resolve());
+			});
 
 			// 检测视频加载失败
 			const reloadInterval = setInterval(() => {
@@ -2160,6 +2240,7 @@ const JobRunner = {
 				) {
 					$console.error('检测到视频加载失败，即将跳过视频。');
 					$message.error('检测到视频加载失败，即将跳过视频。');
+					setTaskState({ status: 'error', message: '视频加载失败，已跳过' });
 					$debug.warn('cx.media', '视频加载失败，跳过', { text: errorDiv?.innerText.slice(0, 80) });
 					finish(() => setTimeout(resolve, 3000));
 				}
@@ -2191,6 +2272,10 @@ const JobRunner = {
 			}, 5000);
 
 			const playFunction = async () => {
+				// 用户通过窗口按钮暂停时，不要自动恢复播放
+				if (isUserPaused()) {
+					return;
+				}
 				// 这里先判断，再检测，否则后续添加多个 await 会导致视频启动等待时间过长，导致用户误认为脚本失效
 				if (hasFaceRecognition()) await waitForFaceRecognition();
 				if (hasNewFaceRecognition()) await waitForNewFaceRecognition();
@@ -2236,7 +2321,7 @@ const JobRunner = {
 	/**
 	 * 章节测验
 	 */
-	async chapter(frame: HTMLIFrameElement, options: ChapterWorkOptions) {
+	async chapter(frame: HTMLIFrameElement, options: ChapterWorkOptions, jobName = '章节测验') {
 		const {
 			answererWrappers,
 			period,
@@ -2409,6 +2494,7 @@ const JobRunner = {
 
 			/** 完成答题后 */
 			async onResultsUpdate(curr, _, res) {
+				updateTaskFromResults(res, { kind: 'quiz', title: jobName });
 				CommonProject.scripts.workResults.methods.setResults(
 					simplifyWorkResult(res, chapterTestTaskQuestionTitleTransform)
 				);
@@ -2504,6 +2590,18 @@ const JobRunner = {
 
 		// 章节测验也提供悬浮控制条（暂停/继续、手动搜题），与作业、考试保持一致
 		attachWorkFloatingBar(worker);
+		setTaskState({
+			kind: 'quiz',
+			status: 'running',
+			title: jobName,
+			platform: '超星学习通',
+			total: TiMu.length,
+			current: 0,
+			progress: 0,
+			questions: TiMu.map((_, index) => (index === 0 ? 'cur' : 'pending')),
+			sources: { cache: 0, bank: 0, ai: 0 },
+			canSkip: false
+		});
 
 		const results = await worker.doWork({ enable_debug: isDebugEnabled() });
 		$debug.log('cx.chapter', '章节测验答题完成', {
@@ -4264,6 +4362,7 @@ function hasNewFaceRecognition() {
  */
 function waitForNewFaceRecognition() {
 	let notified = false;
+	let endBusy: (() => void) | undefined;
 
 	return new Promise<void>((resolve) => {
 		const interval = setInterval(() => {
@@ -4273,6 +4372,7 @@ function waitForNewFaceRecognition() {
 				if (!notified) {
 					notified = true;
 					const msg = '检测到人脸识别，请手动进行识别后脚本才会继续运行。';
+					endBusy = beginBusy('captcha', '需要完成人脸识别');
 					if (CXProject.scripts.study.cfg.notifyWhenHasFaceRecognition) {
 						CommonProject.scripts.settings.methods.notificationBySetting(msg, { duration: 0 });
 					}
@@ -4281,6 +4381,7 @@ function waitForNewFaceRecognition() {
 				}
 			} else {
 				clearInterval(interval);
+				endBusy?.();
 				resolve();
 			}
 		}, 3000);
@@ -4291,6 +4392,7 @@ function waitForNewFaceRecognition() {
  */
 function waitForFaceRecognition() {
 	let notified = false;
+	let endBusy: (() => void) | undefined;
 
 	return new Promise<void>((resolve) => {
 		const interval = setInterval(() => {
@@ -4300,6 +4402,7 @@ function waitForFaceRecognition() {
 				if (!notified) {
 					notified = true;
 					const msg = '检测到人脸识别，请手动进行识别后脚本才会继续运行。';
+					endBusy = beginBusy('captcha', '需要完成人脸识别');
 					if (CXProject.scripts.study.cfg.notifyWhenHasFaceRecognition) {
 						CommonProject.scripts.settings.methods.notificationBySetting(msg, { duration: 0 });
 					}
@@ -4308,6 +4411,7 @@ function waitForFaceRecognition() {
 				}
 			} else {
 				clearInterval(interval);
+				endBusy?.();
 				resolve();
 			}
 		}, 3000);
