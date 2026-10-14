@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name       				南城派网课助手 - 全域名通用版
-// @version    				4.12.45
+// @version    				4.12.46
 // @description				南城派网课助手，基于 OCSJS 二次开发，支持  【超星学习通】 【知到智慧树】 【职教云】 【智慧职教】 【中国大学MOOC】 等网课的学习、作业、考试。
 // @author     				ncccp1
 // @license    				MIT
@@ -637,7 +637,7 @@ var __publicField = (obj, key, value) => {
   EventEmitter.prototype.getMaxListeners = function getMaxListeners() {
     return _getMaxListeners(this);
   };
-  EventEmitter.prototype.emit = function emit(type) {
+  EventEmitter.prototype.emit = function emit2(type) {
     var args = [];
     for (var i = 1; i < arguments.length; i++)
       args.push(arguments[i]);
@@ -3751,7 +3751,8 @@ var __publicField = (obj, key, value) => {
     };
   }
   const AnswerWrapperHandlerConfig = {
-    timeout_seconds: 60
+    timeout_seconds: 60,
+    extra_wait_seconds: 0
   };
   async function defaultAnswerWrapperHandler(answererWrappers, env) {
     const searchInfos = [];
@@ -3862,8 +3863,10 @@ var __publicField = (obj, key, value) => {
       if (typeof data === "string") {
         const matches = data.match(/\${(.*?)}/g) || [];
         matches.forEach((placeHolder) => {
-          const value = env[placeHolder.replace(/\${(.*)}/, "$1")];
-          data = data.replace(placeHolder, (options == null ? void 0 : options.encodeURI) ? encodeURIComponent(value) : value);
+          const raw = env[placeHolder.replace(/\${(.*)}/, "$1")];
+          const value = raw === void 0 || raw === null ? "" : String(raw);
+          const text = (options == null ? void 0 : options.encodeURI) ? encodeURIComponent(value) : value;
+          data = data.replace(placeHolder, () => text);
         });
       } else if (typeof data === "object") {
         const keys = Object.keys(data);
@@ -4047,6 +4050,7 @@ var __publicField = (obj, key, value) => {
         await ((_c2 = (_b2 = this.opts).onResultsUpdate) == null ? void 0 : _c2.call(_b2, results[index], index, results));
       };
       const waitForRequested = async (result) => {
+        const waitSeconds = AnswerWrapperHandlerConfig.timeout_seconds;
         return new Promise((resolve, reject) => {
           const interval = setInterval(() => {
             if ((result == null ? void 0 : result.requested) === true) {
@@ -4058,7 +4062,7 @@ var __publicField = (obj, key, value) => {
           const timeout = setTimeout(() => {
             clearInterval(interval);
             reject(new Error("答题超时！"));
-          }, (AnswerWrapperHandlerConfig.timeout_seconds + 10) * 1e3);
+          }, (waitSeconds + 10 + (AnswerWrapperHandlerConfig.extra_wait_seconds || 0)) * 1e3);
         });
       };
       const resolverThread = async () => {
@@ -4210,7 +4214,7 @@ var __publicField = (obj, key, value) => {
       const questions = await ((_b = (_a = this.opts).questions) == null ? void 0 : _b.call(_a));
       if (options == null ? void 0 : options.enable_debug) {
         console.debug("开始答题", this);
-        console.debug("题目数量: ", this.opts.questions.length);
+        console.debug("题目数量: ", questions.length);
       }
       const results = [];
       for (let index = 0; index < questions.length; index++) {
@@ -4255,7 +4259,7 @@ var __publicField = (obj, key, value) => {
         } catch (err) {
           results[index].requested = true;
           results[index].resolved = false;
-          results[index].finish = true;
+          results[index].finish = false;
           results[index].error = err instanceof Error ? err.message : String(err);
           (_h = (_g = this.opts).onResultsUpdate) == null ? void 0 : _h.call(_g, results[index], index, results);
         }
@@ -5775,7 +5779,7 @@ ${content}</tr>
     serialize(value) {
       return value.toLowerCase().trim().replace(/<[!\/a-z].*?>/ig, "").replace(/[\u2000-\u206F\u2E00-\u2E7F\\'!"#$%&()*+,./:;<=>?@[\]^`{|}~]/g, "").replace(/\s/g, "-");
     }
-    getNextSafeSlug(originalSlug, isDryRun) {
+    getNextSafeSlug(originalSlug, isDryRun2) {
       let slug = originalSlug;
       let occurenceAccumulator = 0;
       if (this.seen.hasOwnProperty(slug)) {
@@ -5785,7 +5789,7 @@ ${content}</tr>
           slug = originalSlug + "-" + occurenceAccumulator;
         } while (this.seen.hasOwnProperty(slug));
       }
-      if (!isDryRun) {
+      if (!isDryRun2) {
         this.seen[originalSlug] = occurenceAccumulator;
         this.seen[slug] = 0;
       }
@@ -6476,12 +6480,16 @@ ${content}</tr>
   const MAX_LOGS = 200;
   const MAX_LOG_CONTENT_LENGTH = 1e3;
   const MAX_LOG_DETAIL_LENGTH = 4e3;
+  const DEBUG_MAX_LOGS = 400;
+  const DEBUG_MAX_LOG_CONTENT_LENGTH = 600;
+  const DEBUG_MAX_LOG_DETAIL_LENGTH = 1500;
   function truncate(text, max) {
     return text.length > max ? text.slice(0, max) + `…（已截断，原长度 ${text.length}）` : text;
   }
   const PANEL_LOG_NAMESPACES = {
     system: "render.console",
-    search: "render.search-console"
+    search: "render.search-console",
+    debug: "render.debug-console"
   };
   function getLogsStoreKey(namespace) {
     return lib.$.namespaceKey(namespace, "logs");
@@ -6512,17 +6520,21 @@ ${content}</tr>
     lib.$store.set(getLogsStoreKey(namespace), []);
   }
   function writePanelLog(namespace, category, type, content, detail) {
+    const isDebug = category === "debug";
+    const maxLogs = isDebug ? DEBUG_MAX_LOGS : MAX_LOGS;
+    const maxContent = isDebug ? DEBUG_MAX_LOG_CONTENT_LENGTH : MAX_LOG_CONTENT_LENGTH;
+    const maxDetail = isDebug ? DEBUG_MAX_LOG_DETAIL_LENGTH : MAX_LOG_DETAIL_LENGTH;
     let logs = getPanelLogs(namespace);
-    if (logs.length >= MAX_LOGS) {
-      logs = logs.slice(-(MAX_LOGS - 1));
+    if (logs.length >= maxLogs) {
+      logs = logs.slice(-(maxLogs - 1));
     }
     logs = logs.concat({
       type,
       category,
-      content: truncate(content, MAX_LOG_CONTENT_LENGTH),
+      content: truncate(content, maxContent),
       time: Date.now(),
-      stack: getLogStack().slice(0, 600),
-      detail: detail === void 0 ? void 0 : truncate(stringifyLogValue(detail), MAX_LOG_DETAIL_LENGTH)
+      stack: isDebug ? "" : getLogStack().slice(0, 600),
+      detail: detail === void 0 ? void 0 : truncate(stringifyLogValue(detail), maxDetail)
     });
     lib.$store.set(getLogsStoreKey(namespace), logs);
   }
@@ -6551,11 +6563,532 @@ ${content}</tr>
     });
   }
   const $searchConsole = createPanelLogger(PANEL_LOG_NAMESPACES.search, "search");
+  const DEV_NAMESPACE = "background.dev";
+  const DEBUG_STORE_KEYS = {
+    enabled: lib.$.namespaceKey(DEV_NAMESPACE, "debugEnabled"),
+    dryRun: lib.$.namespaceKey(DEV_NAMESPACE, "dryRun")
+  };
+  function readBoolean(key) {
+    try {
+      const value = lib.$store.get(key, false);
+      return value === true || value === "true";
+    } catch {
+      return false;
+    }
+  }
+  function isDebugEnabled() {
+    return readBoolean(DEBUG_STORE_KEYS.enabled);
+  }
+  function isDryRun() {
+    return readBoolean(DEBUG_STORE_KEYS.dryRun);
+  }
+  function framePrefix() {
+    try {
+      return self === top ? "" : "[iframe] ";
+    } catch {
+      return "[iframe] ";
+    }
+  }
+  const debugConsole = createPanelLogger(PANEL_LOG_NAMESPACES.debug, "debug");
+  function emit(level, module2, message2, detail) {
+    if (!isDebugEnabled()) {
+      return;
+    }
+    const content = `${framePrefix()}[${module2}] ${message2}`;
+    try {
+      if (detail === void 0) {
+        debugConsole[level](content);
+      } else {
+        debugConsole[level](content, detail);
+      }
+    } catch {
+    }
+    console.debug("[ncp-debug]", content, detail === void 0 ? "" : detail);
+  }
+  const $debug = {
+    log(module2, message2, detail) {
+      emit("info", module2, message2, detail);
+    },
+    skip(module2, message2, detail) {
+      emit("warn", module2, "跳过：" + message2, detail);
+    },
+    warn(module2, message2, detail) {
+      emit("warn", module2, message2, detail);
+    },
+    error(module2, message2, detail) {
+      emit("error", module2, message2, detail);
+    }
+  };
+  function skipInDryRun(action, module2 = "dry-run") {
+    if (!isDryRun()) {
+      return false;
+    }
+    const message2 = `试运行模式：已跳过「${action}」`;
+    writePanelLog(PANEL_LOG_NAMESPACES.system, "system", "warn", message2);
+    $debug.skip(module2, action);
+    return true;
+  }
+  const REQUEST_KEY = "ncp.snapshot.request";
+  const RESPONSE_PREFIX = "ncp.snapshot.response.";
+  const INSTANCE_ID = lib.$.uuid();
+  const COLLECT_WAIT_MS = 2500;
+  const collectors = /* @__PURE__ */ new Map();
+  function registerSnapshotCollector(name, collector) {
+    collectors.set(name, collector);
+  }
+  function runCollectors() {
+    const extras = {};
+    collectors.forEach((collector, name) => {
+      try {
+        extras[name] = collector();
+      } catch (error) {
+        extras[name] = { error: String(error) };
+      }
+    });
+    return extras;
+  }
+  const SENSITIVE_PARAM = new RegExp(
+    "^(" + [
+      ...["enc", "token", "uid", "puid", "userid", "user_id", "cpi", "openc", "ticket", "key", "secret"],
+      ...["password", "pwd", "sign", "signature", "auth", "authorization", "session", "sessionid"],
+      ...["jsessionid", "code", "access_token", "refresh_token"]
+    ].join("|") + ")$",
+    "i"
+  );
+  const SENSITIVE_NAME = /(api[-_]?key|apikey|token|password|passwd|secret|poolid|tkuid|\.pp$|userid|user_id|cookie|authorization|enc$)/i;
+  function redactUrl(url) {
+    if (!url) {
+      return url;
+    }
+    try {
+      const parsed = new URL(url, location.href);
+      let changed = false;
+      parsed.searchParams.forEach((_, key) => {
+        if (SENSITIVE_PARAM.test(key)) {
+          parsed.searchParams.set(key, "[redacted]");
+          changed = true;
+        }
+      });
+      return changed || /^https?:/i.test(url) ? parsed.toString().replace(/%5Bredacted%5D/g, "[redacted]") : url;
+    } catch {
+      return url.replace(/([?&](?:enc|token|uid|puid|userid|cpi|openc|ticket|key)=)[^&#]*/gi, "$1[redacted]");
+    }
+  }
+  const SKIP_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "NOSCRIPT", "LINK", "META"]);
+  const VOID_TAGS = /* @__PURE__ */ new Set(["AREA", "BASE", "BR", "COL", "EMBED", "HR", "IMG", "INPUT", "SOURCE", "TRACK", "WBR"]);
+  const STRUCTURE_ATTRS = /* @__PURE__ */ new Set([
+    "id",
+    "class",
+    "name",
+    "type",
+    "role",
+    "href",
+    "src",
+    "action",
+    "for",
+    "title",
+    "alt",
+    "placeholder",
+    "onclick",
+    "tabindex",
+    "cardid",
+    "jobid",
+    "objectid",
+    "mid",
+    "data",
+    "target",
+    "disabled",
+    "checked",
+    "selected",
+    "hidden"
+  ]);
+  function cut(text, max) {
+    return text.length > max ? text.slice(0, max) + `…(${text.length})` : text;
+  }
+  function escapeAttr(value) {
+    return value.replace(/"/g, "&quot;").replace(/\n/g, " ");
+  }
+  function serializeAttributes(el, mode) {
+    const parts = [];
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      let value = attr.value;
+      if (mode === "structure") {
+        const keep = STRUCTURE_ATTRS.has(name) || name.startsWith("data-") || name.startsWith("aria-");
+        if (!keep) {
+          if (name === "style" && /display|visibility|opacity/i.test(value)) {
+            value = cut(value, 80);
+          } else {
+            continue;
+          }
+        }
+      }
+      if (name === "value") {
+        continue;
+      }
+      if (SENSITIVE_NAME.test(name)) {
+        value = "[redacted]";
+      } else if (/^(href|src|action|data-src|data-url|data-href)$/.test(name) || /^https?:\/\//i.test(value)) {
+        value = redactUrl(value);
+      } else if (name === "data") {
+        value = value.replace(/("(?:enc|token|uid|puid|userid|cpi|openc)"\s*:\s*")[^"]*"/gi, '$1[redacted]"');
+      }
+      const max = name === "onclick" ? 200 : name === "data" ? 800 : mode === "full" ? 2e3 : 160;
+      parts.push(` ${name}="${escapeAttr(cut(value, max))}"`);
+    }
+    return parts.join("");
+  }
+  function serializeDocument(doc, mode) {
+    const limit = mode === "full" ? 4e4 : 15e3;
+    const maxDepth = 90;
+    const textMax = mode === "full" ? 2e3 : 40;
+    const skipRoots = /* @__PURE__ */ new Set();
+    for (const el of [lib.$elements.root, lib.$elements.tooltipContainer]) {
+      if (el) {
+        skipRoots.add(el);
+      }
+    }
+    const out = [];
+    let count = 0;
+    let truncated = false;
+    let iframeIndex = 0;
+    const walk = (node, depth) => {
+      if (count >= limit) {
+        truncated = true;
+        return;
+      }
+      if (depth > maxDepth) {
+        truncated = true;
+        return;
+      }
+      const indent = "  ".repeat(Math.min(depth, 40));
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+        if (text) {
+          out.push(indent + cut(text, textMax));
+        }
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+      const el = node;
+      if (skipRoots.has(el) || SKIP_TAGS.has(el.tagName)) {
+        return;
+      }
+      count++;
+      const tag = el.tagName.toLowerCase();
+      let attrs = serializeAttributes(el, mode);
+      if (tag === "iframe" || tag === "frame") {
+        attrs += ` data-ncp-frame="${iframeIndex++}"`;
+      }
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        const hidden = el instanceof HTMLInputElement && el.type === "hidden";
+        const name = el.name || el.id || "";
+        if (hidden && !SENSITIVE_NAME.test(name)) {
+          attrs += ` data-ncp-value="${escapeAttr(cut(el.value, 120))}"`;
+        } else {
+          attrs += ` data-ncp-value-length="${el.value.length}"`;
+        }
+        if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+          attrs += ` data-ncp-checked="${el.checked}"`;
+        }
+      }
+      if (el instanceof HTMLSelectElement) {
+        attrs += ` data-ncp-selected="${el.selectedIndex}"`;
+      }
+      if (el instanceof SVGElement && tag !== "svg") {
+        return;
+      }
+      if (VOID_TAGS.has(el.tagName) || el.childNodes.length === 0 || tag === "svg") {
+        out.push(`${indent}<${tag}${attrs}${tag === "svg" ? " …" : ""}/>`);
+        return;
+      }
+      out.push(`${indent}<${tag}${attrs}>`);
+      for (const child of Array.from(el.childNodes)) {
+        walk(child, depth + 1);
+      }
+      out.push(`${indent}</${tag}>`);
+    };
+    const root2 = doc.documentElement;
+    if (root2) {
+      const title = doc.title ? cut(doc.title, 80) : "";
+      out.push(`<!-- title: ${title.replace(/--/g, "- -")} -->`);
+      const body = doc.body;
+      if (body) {
+        walk(body, 0);
+      }
+    }
+    return { html: out.join("\n"), nodeCount: count, truncated };
+  }
+  function computeFramePath() {
+    try {
+      const parts = [];
+      let current = window;
+      let guard = 0;
+      while (current !== current.parent && guard++ < 20) {
+        const parent = current.parent;
+        let index = -1;
+        for (let i = 0; i < parent.frames.length; i++) {
+          if (parent.frames[i] === current) {
+            index = i;
+            break;
+          }
+        }
+        parts.unshift(index);
+        current = parent;
+      }
+      return parts.map((n) => n < 0 ? "?" : String(n)).join("/");
+    } catch {
+      return "?";
+    }
+  }
+  function isTopWindow() {
+    try {
+      return self === top;
+    } catch {
+      return false;
+    }
+  }
+  function collectFrameSnapshot(mode) {
+    try {
+      const { html, nodeCount, truncated } = serializeDocument(document, mode);
+      return {
+        path: isTopWindow() ? "" : computeFramePath(),
+        url: redactUrl(location.href),
+        title: document.title,
+        mode,
+        readyState: document.readyState,
+        visibility: document.visibilityState,
+        nodeCount,
+        truncated,
+        html,
+        extras: runCollectors()
+      };
+    } catch (error) {
+      return {
+        path: isTopWindow() ? "" : computeFramePath(),
+        url: redactUrl(location.href),
+        title: "",
+        mode,
+        readyState: document.readyState,
+        visibility: document.visibilityState,
+        nodeCount: 0,
+        truncated: false,
+        html: "",
+        extras: {},
+        error: String(error)
+      };
+    }
+  }
+  function getTopOrigin() {
+    try {
+      return window.top ? window.top.location.origin : location.origin;
+    } catch {
+      const origins = location.ancestorOrigins;
+      return origins && origins.length ? origins[origins.length - 1] : "";
+    }
+  }
+  function isRequestForThisTab(request2) {
+    try {
+      if (window.top) {
+        return window.top.location.href === request2.topUrl;
+      }
+    } catch {
+    }
+    const origin = getTopOrigin();
+    return Boolean(origin) && origin === request2.topOrigin;
+  }
+  let responderInstalled = false;
+  function installSnapshotResponder() {
+    if (responderInstalled) {
+      return;
+    }
+    responderInstalled = true;
+    let lastHandled = "";
+    lib.$store.addChangeListener(REQUEST_KEY, (curr) => {
+      if (!curr || typeof curr !== "object" || !curr.id || curr.id === lastHandled) {
+        return;
+      }
+      if (curr.requester === INSTANCE_ID) {
+        return;
+      }
+      if (!isRequestForThisTab(curr)) {
+        return;
+      }
+      lastHandled = curr.id;
+      const snapshot = collectFrameSnapshot(curr.mode === "full" ? "full" : "structure");
+      lib.$store.set(`${RESPONSE_PREFIX}${curr.id}.${INSTANCE_ID}`, snapshot);
+    });
+  }
+  function redactSettings() {
+    const result = {};
+    let keys = [];
+    try {
+      keys = lib.$store.list();
+    } catch {
+      return result;
+    }
+    for (const key of keys) {
+      if (key.startsWith("_tab_change_") || key.startsWith("ncp.snapshot.")) {
+        continue;
+      }
+      let value;
+      try {
+        value = lib.$store.get(key);
+      } catch {
+        continue;
+      }
+      if (SENSITIVE_NAME.test(key)) {
+        result[key] = "[redacted]";
+      } else if (/\.(logs|searchLogs|list)$/.test(key)) {
+        result[key] = Array.isArray(value) ? `[${value.length} items]` : "[omitted]";
+      } else if (/localQuestionCaches$/.test(key)) {
+        result[key] = Array.isArray(value) ? `[${value.length} caches]` : "[omitted]";
+      } else if (/answererWrappers$/.test(key) && Array.isArray(value)) {
+        result[key] = value.map((w) => ({ name: w == null ? void 0 : w.name, url: redactUrl(String((w == null ? void 0 : w.url) || "")), method: w == null ? void 0 : w.method }));
+      } else if (typeof value === "string") {
+        result[key] = cut(value, 200);
+      } else if (Array.isArray(value) && value.length > 30) {
+        result[key] = `[${value.length} items]`;
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+  function tailLogs(namespace, count) {
+    try {
+      return getPanelLogs(namespace).slice(-count).map((log) => ({
+        time: new Date(log.time).toISOString(),
+        type: log.type,
+        content: log.content,
+        detail: log.detail
+      }));
+    } catch {
+      return [];
+    }
+  }
+  function download(filename, content) {
+    const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 2e3);
+  }
+  async function exportPageSnapshot(mode = "structure") {
+    var _a, _b;
+    const id = lib.$.uuid();
+    const request2 = {
+      id,
+      mode,
+      requester: INSTANCE_ID,
+      topUrl: location.href,
+      topOrigin: location.origin,
+      time: Date.now()
+    };
+    lib.$store.set(REQUEST_KEY, request2);
+    const own = collectFrameSnapshot(mode);
+    await new Promise((resolve) => setTimeout(resolve, COLLECT_WAIT_MS));
+    const prefix = `${RESPONSE_PREFIX}${id}.`;
+    const frames = [own];
+    try {
+      for (const key of lib.$store.list()) {
+        if (key.startsWith(prefix)) {
+          const value = lib.$store.get(key);
+          if (value && typeof value === "object") {
+            frames.push(value);
+          }
+          lib.$store.delete(key);
+        }
+      }
+      lib.$store.delete(REQUEST_KEY);
+    } catch {
+    }
+    frames.sort((a, b) => a.path.localeCompare(b.path, void 0, { numeric: true }));
+    const infos = lib.$gm.getInfos();
+    const bundle = {
+      kind: "ncp-page-snapshot",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      mode,
+      script: {
+        name: (_a = infos == null ? void 0 : infos.script) == null ? void 0 : _a.name,
+        version: (_b = infos == null ? void 0 : infos.script) == null ? void 0 : _b.version,
+        handler: infos == null ? void 0 : infos.scriptHandler
+      },
+      page: {
+        url: redactUrl(location.href),
+        title: document.title,
+        userAgent: navigator.userAgent,
+        viewport: `${window.innerWidth}x${window.innerHeight}`
+      },
+      frames,
+      settings: redactSettings(),
+      logs: {
+        system: tailLogs(PANEL_LOG_NAMESPACES.system, 100),
+        search: tailLogs(PANEL_LOG_NAMESPACES.search, 50),
+        debug: tailLogs(PANEL_LOG_NAMESPACES.debug, 400)
+      },
+      notes: [
+        mode === "structure" ? "结构模式：文本最多保留 40 个字符，输入框只记录内容长度。" : "完整模式：保留完整文本，可能包含姓名、学校等个人信息，发送前请自行检查。",
+        "链接中的 enc / token / uid / puid / cpi 等参数已替换为 [redacted]。",
+        "没有返回结果的 iframe 一般是跨域广告或脚本未运行的页面。"
+      ]
+    };
+    const host = (() => {
+      try {
+        return location.hostname.replace(/[^a-z0-9.-]/gi, "_");
+      } catch {
+        return "page";
+      }
+    })();
+    const time = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    const filename = `ncp-snapshot-${mode}-${host}-${time}.json`;
+    const json = JSON.stringify(bundle, null, 1);
+    download(filename, json);
+    return {
+      filename,
+      frameCount: frames.length,
+      size: json.length,
+      truncated: frames.some((f) => f.truncated)
+    };
+  }
+  function exportDebugLogs() {
+    var _a, _b;
+    const infos = lib.$gm.getInfos();
+    const content = JSON.stringify(
+      {
+        kind: "ncp-debug-logs",
+        createdAt: new Date().toISOString(),
+        script: { name: (_a = infos == null ? void 0 : infos.script) == null ? void 0 : _a.name, version: (_b = infos == null ? void 0 : infos.script) == null ? void 0 : _b.version },
+        page: redactUrl(location.href),
+        logs: {
+          system: tailLogs(PANEL_LOG_NAMESPACES.system, 200),
+          search: tailLogs(PANEL_LOG_NAMESPACES.search, 200),
+          debug: tailLogs(PANEL_LOG_NAMESPACES.debug, 400)
+        }
+      },
+      null,
+      1
+    );
+    const filename = `ncp-debug-logs-${new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19)}.json`;
+    download(filename, content);
+    return { filename, size: content.length };
+  }
   const state$6 = {
     console: {
       listenerIds: {
         logs: 0,
-        searchLogs: 0
+        searchLogs: 0,
+        debugLogs: 0
       }
     },
     app: {
@@ -6567,7 +7100,7 @@ ${content}</tr>
     }
   };
   const RELEASE_BASE_URL = "https://raw.githubusercontent.com/ncccp1/ocs/main/release/";
-  const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1e3;
+  const UPDATE_CHECK_INTERVAL = 60 * 60 * 1e3;
   function isNewerVersion(remote, local) {
     const a = remote.split(".").map((n) => parseInt(n, 10) || 0);
     const b = local.split(".").map((n) => parseInt(n, 10) || 0);
@@ -6580,7 +7113,7 @@ ${content}</tr>
     return false;
   }
   const getTypeDesc = (type) => type === "info" ? "信息" : type === "error" ? "错误" : type === "warn" ? "警告" : type === "debug" ? "调试" : "日志";
-  const getCategoryDesc = (category) => category === "search" ? "搜题" : "系统";
+  const getCategoryDesc = (category) => category === "search" ? "搜题" : category === "debug" ? "调试" : "系统";
   function renderLogPanel(script2, panel, listenerRef, namespace, title) {
     const createLog = (log) => {
       const date = new Date(log.time);
@@ -6702,6 +7235,34 @@ ${content}</tr>
         },
         onrender({ panel }) {
           renderLogPanel(this, panel, "searchLogs", PANEL_LOG_NAMESPACES.search, "搜题日志");
+        }
+      }),
+      debugConsole: new lib.Script({
+        name: "🐞 调试日志",
+        matches: [["所有", /.*/]],
+        namespace: "render.debug-console",
+        configs: {
+          notes: {
+            defaultValue: lib.$ui.notes([
+              "调试日志：记录脚本“为什么这样做/为什么没做”，用于排查问题和开发新功能。",
+              "需要先在 后台 -> 开发者调试 中开启“调试模式”，关闭时不会产生任何记录。",
+              "日志可在 后台 -> 开发者调试 中导出，连同页面元素快照一起发给开发者即可。"
+            ]).outerHTML
+          },
+          logs: {
+            defaultValue: []
+          }
+        },
+        onrender({ panel }) {
+          renderLogPanel(this, panel, "debugLogs", PANEL_LOG_NAMESPACES.debug, "调试日志");
+        }
+      }),
+      debugResponder: new lib.Script({
+        name: "🐞 页面快照响应器",
+        hideInPanel: true,
+        matches: [["所有页面", /.*/]],
+        onstart() {
+          installSnapshotResponder();
         }
       }),
       appConfigSync: new lib.Script({
@@ -6902,12 +7463,12 @@ ${content}</tr>
         namespace: "background.update",
         configs: {
           notes: {
-            defaultValue: "脚本自动更新模块，如果有新的版本会自动通知。"
+            defaultValue: "脚本每 1 小时自动检查一次更新，发现新版本时会在页面上提醒；也可以在下方手动检查。"
           },
           autoNotify: {
             defaultValue: true,
             label: "开启更新通知",
-            attrs: { type: "checkbox", title: "当有最新的版本时自动弹窗通知，默认开启" }
+            attrs: { type: "checkbox", title: "当有最新的版本时在页面上提醒，默认开启" }
           },
           notToday: {
             defaultValue: -1
@@ -6917,6 +7478,9 @@ ${content}</tr>
           },
           lastCheck: {
             defaultValue: 0
+          },
+          notifiedVersion: {
+            defaultValue: ""
           }
         },
         methods() {
@@ -6924,103 +7488,193 @@ ${content}</tr>
             var _a, _b;
             return (((_b = (_a = lib.$gm.getInfos()) == null ? void 0 : _a.script) == null ? void 0 : _b.name) || "").includes("全域名通用版") ? "nanchengpai.common" : "nanchengpai";
           };
-          return {
-            getDownloadUrl: () => RELEASE_BASE_URL + releaseName() + ".user.js",
-            getLastVersion: async () => {
-              var _a;
-              let version = "";
-              try {
-                const meta = await request(RELEASE_BASE_URL + releaseName() + ".meta.js?t=" + Date.now(), {
-                  method: "get",
-                  type: "GM_xmlhttpRequest",
-                  responseType: "text"
-                });
-                version = ((_a = String(meta).match(/@version\s+([0-9][0-9.]*)/)) == null ? void 0 : _a[1]) || "";
-              } catch (e) {
-                console.warn("[update] 读取最新版本失败", e);
-              }
-              return {
-                "last-version": version || "unknown",
-                resource: {},
-                notes: []
-              };
+          let lastResult;
+          let promptMessage;
+          const getDownloadUrl = () => RELEASE_BASE_URL + releaseName() + ".user.js";
+          const getLastVersion = async () => {
+            var _a;
+            let version = "";
+            try {
+              const meta = await request(RELEASE_BASE_URL + releaseName() + ".meta.js?t=" + Date.now(), {
+                method: "get",
+                type: "GM_xmlhttpRequest",
+                responseType: "text"
+              });
+              version = ((_a = String(meta).match(/@version\s+([0-9][0-9.]*)/)) == null ? void 0 : _a[1]) || "";
+            } catch (e) {
+              console.warn("[update] 读取最新版本失败", e);
             }
+            return {
+              "last-version": version || "unknown",
+              resource: {},
+              notes: []
+            };
+          };
+          const showPrompt = (last, current) => {
+            if (promptMessage == null ? void 0 : promptMessage.isConnected) {
+              return;
+            }
+            const today = Math.floor(Date.now() / 864e5);
+            const button = (text, primary, onClick) => {
+              const btn = lib.h("button", { className: primary ? "base-style-button" : "base-style-button-secondary" }, text);
+              btn.style.marginRight = "8px";
+              btn.onclick = onClick;
+              return btn;
+            };
+            promptMessage = lib.$message.info({
+              duration: 0,
+              content: lib.h("div", { style: { lineHeight: "1.8" } }, [
+                lib.h("div", [lib.h("b", `发现新版本 ${last}`), `（当前 ${current}）`]),
+                lib.h(
+                  "div",
+                  { style: { fontSize: "12px", opacity: "0.8" } },
+                  "点击“立即更新”，在脚本管理器打开的页面里确认安装即可。"
+                ),
+                lib.h("div", { style: { marginTop: "6px" } }, [
+                  button("立即更新", true, () => {
+                    window.open(getDownloadUrl(), "_blank");
+                    promptMessage == null ? void 0 : promptMessage.remove();
+                  }),
+                  button("更新日志", false, () => CommonProject.scripts.apps.methods.showChangelog()),
+                  button("今天不再提示", false, () => {
+                    this.cfg.notToday = today;
+                    promptMessage == null ? void 0 : promptMessage.remove();
+                  }),
+                  button("忽略此版本", false, () => {
+                    this.cfg.ignoreVersions = [...this.cfg.ignoreVersions, last];
+                    promptMessage == null ? void 0 : promptMessage.remove();
+                  })
+                ])
+              ])
+            });
+          };
+          const check = async (manual = false) => {
+            var _a;
+            const infos = lib.$gm.getInfos();
+            const current = ((_a = infos == null ? void 0 : infos.script) == null ? void 0 : _a.version) || "";
+            const last = (await getLastVersion())["last-version"];
+            const now2 = Date.now();
+            this.cfg.lastCheck = now2;
+            const status = last === "unknown" ? "error" : isNewerVersion(last, current) ? "new" : "latest";
+            lastResult = { status, last, current, checkedAt: now2 };
+            $debug.log("update", "检查更新", lastResult);
+            if (!manual && status === "new" && this.cfg.autoNotify) {
+              const today = Math.floor(now2 / 864e5);
+              if (!this.cfg.ignoreVersions.includes(last) && this.cfg.notToday !== today) {
+                showPrompt(last, current);
+                if (this.cfg.notifiedVersion !== last) {
+                  this.cfg.notifiedVersion = last;
+                  CommonProject.scripts.settings.methods.notificationBySetting(
+                    `南城派网课助手有新版本 ${last}，当前 ${current}`,
+                    { extraTitle: "南城派网课助手" }
+                  );
+                }
+              }
+            }
+            return lastResult;
+          };
+          return {
+            getDownloadUrl,
+            getLastVersion,
+            check,
+            getLastResult: () => lastResult
           };
         },
-        async onrender({ panel }) {
-          const version = await this.methods.getLastVersion();
+        onrender({ panel }) {
           const infos = lib.$gm.getInfos();
           if (!infos) {
             return;
           }
-          const changeLog = lib.h("button", { className: "base-style-button-secondary" }, "📄查看更新日志");
+          const current = infos.script.version;
+          const updateUrl = this.methods.getDownloadUrl();
+          const statusEl = lib.h("span", { style: { fontWeight: "bold" } }, "检查中...");
+          const latestEl = lib.h("span", "...");
+          const timeEl = lib.h("div", { style: { fontSize: "12px", opacity: "0.75", marginTop: "4px" } }, "");
+          const checkBtn = lib.h("button", { className: "base-style-button" }, "🔄 立即检查更新");
+          const installBtn = lib.h("button", { className: "base-style-button" }, "⬇️ 立即更新");
+          installBtn.style.display = "none";
+          installBtn.style.marginLeft = "8px";
+          installBtn.onclick = () => window.open(updateUrl, "_blank");
+          const changeLog = lib.h("button", { className: "base-style-button-secondary" }, "📄 更新日志");
+          changeLog.style.marginLeft = "8px";
           changeLog.onclick = () => CommonProject.scripts.apps.methods.showChangelog();
-          const updatePage = this.methods.getDownloadUrl();
+          const showResult = (result) => {
+            latestEl.textContent = result.last === "unknown" ? "未知" : result.last;
+            if (result.status === "new") {
+              statusEl.textContent = "🆕 发现新版本";
+              statusEl.style.color = "#e67e22";
+            } else if (result.status === "latest") {
+              statusEl.textContent = "✅ 已是最新版本";
+              statusEl.style.color = "#2e9e5b";
+            } else {
+              statusEl.textContent = "⚠️ 检查失败（可能无法访问 GitHub，请稍后重试）";
+              statusEl.style.color = "#d9534f";
+            }
+            installBtn.style.display = result.status === "new" ? "inline-block" : "none";
+            timeEl.textContent = "上次检查：" + new Date(result.checkedAt).toLocaleTimeString();
+          };
+          const runCheck = async () => {
+            checkBtn.disabled = true;
+            checkBtn.textContent = "检查中...";
+            statusEl.textContent = "检查中...";
+            statusEl.style.color = "";
+            try {
+              showResult(await this.methods.check(true));
+            } finally {
+              checkBtn.disabled = false;
+              checkBtn.textContent = "🔄 立即检查更新";
+            }
+          };
+          checkBtn.onclick = runCheck;
           panel.body.replaceChildren(
             lib.h("div", { className: "card" }, [
+              lib.h("div", { style: { lineHeight: "1.9" } }, [
+                lib.h("div", ["当前版本：", lib.h("b", current)]),
+                lib.h("div", ["最新版本：", latestEl]),
+                lib.h("div", ["状态：", statusEl]),
+                timeEl
+              ]),
+              lib.h("div", { style: { margin: "10px 0" } }, [checkBtn, installBtn, changeLog]),
               lib.h("hr"),
-              lib.h("div", ["最新版本：" + version["last-version"] + " - ", changeLog]),
-              lib.h("hr"),
-              lib.h("div", "当前版本：" + infos.script.version),
-              lib.h("div", "脚本管理器：" + infos.scriptHandler),
-              lib.h("div", ["脚本更新链接：", lib.h("a", { target: "_blank", href: updatePage }, [updatePage || "无"])])
+              lib.h("div", { style: { fontSize: "12px", opacity: "0.8", lineHeight: "1.7" } }, [
+                lib.h("div", `脚本管理器：${infos.scriptHandler}`),
+                lib.h("div", ["更新地址：", lib.h("a", { target: "_blank", href: updateUrl }, updateUrl)]),
+                lib.h(
+                  "div",
+                  "脚本会每 1 小时自动检查一次；脚本管理器（Tampermonkey、脚本猫等）也有自己的更新检查周期，可在其设置中调整。"
+                )
+              ])
             ])
           );
-          console.log("versions", {
-            notToday: this.cfg.notToday,
-            ignoreVersions: this.cfg.ignoreVersions,
-            version
-          });
+          const previous = this.methods.getLastResult();
+          if (previous) {
+            showResult(previous);
+          } else {
+            runCheck();
+          }
         },
         async oncomplete() {
-          if (window.top !== window || !this.cfg.autoNotify) {
+          if (window.top !== window) {
             return;
           }
           const infos = lib.$gm.getInfos();
           if (!infos || /\(dev\)/i.test(infos.script.name || "")) {
             return;
           }
-          const now2 = Date.now();
-          if (now2 - (this.cfg.lastCheck || 0) < UPDATE_CHECK_INTERVAL) {
-            return;
-          }
-          this.cfg.lastCheck = now2;
-          const last = (await this.methods.getLastVersion())["last-version"];
-          const current = infos.script.version;
-          if (last === "unknown" || !isNewerVersion(last, current)) {
-            return;
-          }
-          const today = Math.floor(now2 / 864e5);
-          if (this.cfg.ignoreVersions.includes(last) || this.cfg.notToday === today) {
-            return;
-          }
-          const url = this.methods.getDownloadUrl();
-          const ignoreLink = lib.h("a", { style: { cursor: "pointer" } }, "忽略此版本");
-          const modal2 = lib.$modal.confirm({
-            content: lib.h("div", [
-              lib.h("div", `发现新版本 ${last}（当前 ${current}）。`),
-              lib.h("div", { style: { margin: "8px 0" } }, "点击“立即更新”后，在脚本管理器的安装页面确认即可。"),
-              ignoreLink
-            ]),
-            confirmButtonText: "立即更新",
-            cancelButtonText: "今天不再提示",
-            onConfirm: () => {
-              window.open(url, "_blank");
-            },
-            onCancel: () => {
-              this.cfg.notToday = today;
+          const run = async () => {
+            if (!this.cfg.autoNotify) {
+              return;
             }
-          });
-          ignoreLink.onclick = () => {
-            this.cfg.ignoreVersions = [...this.cfg.ignoreVersions, last];
-            modal2 == null ? void 0 : modal2.remove();
+            try {
+              await this.methods.check(false);
+            } catch (error) {
+              console.warn("[update] 检查更新出错", error);
+            }
           };
-          CommonProject.scripts.settings.methods.notificationBySetting(
-            `南城派网课助手有新版本 ${last}，当前 ${current}`,
-            {
-              extraTitle: "南城派网课助手"
-            }
-          );
+          if (Date.now() - (this.cfg.lastCheck || 0) >= UPDATE_CHECK_INTERVAL) {
+            run();
+          }
+          setInterval(run, UPDATE_CHECK_INTERVAL);
         }
       }),
       dev: new lib.Script({
@@ -7029,7 +7683,25 @@ ${content}</tr>
         matches: [["所有页面", /./]],
         configs: {
           notes: {
-            defaultValue: "开发人员调试用。<br>注入 NCP_CONTEXT（同时兼容 OCS_CONTEXT）全局变量。用户可忽略此页面。"
+            defaultValue: lib.$ui.notes([
+              "开发人员调试用，用户可忽略此页面。",
+              "开启“调试模式”后，脚本会把关键决策（任务点为什么被跳过、跳转走了哪个分支、缓存命中情况等）记录到 后台 -> 调试日志。",
+              "“试运行”：照常搜题、答题和记录日志，但不会提交、不会保存、不会自动跳转章节，适合在真实页面上验证流程。",
+              "遇到“卡住”“找不到元素”等问题时，点击下方“导出页面元素”，把下载的文件发给开发者。"
+            ]).outerHTML
+          },
+          debugEnabled: {
+            label: "开启调试模式",
+            defaultValue: false,
+            attrs: { type: "checkbox", title: "记录详细的调试日志（后台 -> 调试日志），并在浏览器控制台输出，默认关闭。" }
+          },
+          dryRun: {
+            label: "试运行（不提交/不保存/不跳转）",
+            defaultValue: false,
+            attrs: {
+              type: "checkbox",
+              title: "开启后脚本会照常搜题、填写答案，但不会提交、保存，也不会自动跳转到下一个章节/小节。"
+            }
           },
           show_debug_cursor: {
             defaultValue: true,
@@ -7065,7 +7737,70 @@ ${content}</tr>
               });
             });
           });
-          panel.body.replaceChildren(lib.h("div", { className: "card" }, [lib.h("hr"), injectBtn, showTabDataBtn]));
+          const runExport = async (mode, button) => {
+            const text = button.textContent;
+            button.disabled = true;
+            button.textContent = "导出中...";
+            try {
+              const result = await exportPageSnapshot(mode);
+              const kb = Math.round(result.size / 1024);
+              lib.$message.success({
+                content: `已导出 ${result.filename}（${result.frameCount} 层页面，${kb} KB）${result.truncated ? "，部分页面过大已截断" : ""}`,
+                duration: 8
+              });
+            } catch (error) {
+              lib.$message.error({ content: "导出页面元素失败：" + String(error) });
+            } finally {
+              button.disabled = false;
+              button.textContent = text;
+            }
+          };
+          const structureBtn = lib.h(
+            "button",
+            { className: "base-style-button" },
+            "导出页面元素（推荐）"
+          );
+          structureBtn.title = "导出所有层级页面的结构，文本只保留前 40 个字符，已隐藏账号相关参数";
+          structureBtn.onclick = () => runExport("structure", structureBtn);
+          const fullBtn = lib.h("button", { className: "base-style-button-secondary" }, "导出完整HTML");
+          fullBtn.title = "保留完整文本，可能包含姓名、学校等个人信息，发送前请自行检查";
+          fullBtn.onclick = () => runExport("full", fullBtn);
+          const logsBtn = lib.h("button", { className: "base-style-button-secondary" }, "导出日志");
+          logsBtn.onclick = () => {
+            const result = exportDebugLogs();
+            lib.$message.success({ content: `已导出 ${result.filename}`, duration: 5 });
+          };
+          const clearDebugBtn = lib.h(
+            "button",
+            { className: "base-style-button-secondary" },
+            "清空调试日志"
+          );
+          clearDebugBtn.onclick = () => {
+            clearPanelLogs(PANEL_LOG_NAMESPACES.debug);
+            lib.$message.success({ content: "调试日志已清空", duration: 3 });
+          };
+          const status = lib.h(
+            "div",
+            { style: { margin: "8px 0", fontSize: "12px", opacity: "0.8" } },
+            `当前状态：调试模式${isDebugEnabled() ? "已开启" : "未开启"}，试运行${isDryRun() ? "已开启" : "未开启"}`
+          );
+          const row = (...buttons) => lib.h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", margin: "8px 0" } }, buttons);
+          panel.body.replaceChildren(
+            lib.h("div", { className: "card" }, [
+              status,
+              lib.h("b", "页面元素"),
+              row(structureBtn, fullBtn),
+              lib.h("b", "日志"),
+              row(logsBtn, clearDebugBtn),
+              lib.h("b", "其他"),
+              row(injectBtn, showTabDataBtn)
+            ])
+          );
+        },
+        oncomplete() {
+          if (isDebugEnabled()) {
+            $debug.log("debug", "调试模式已开启", { dryRun: isDryRun(), url: window.location.href });
+          }
         }
       }),
       appLoginHelper: new lib.Script({
@@ -7442,6 +8177,9 @@ ${content}</tr>
           await lib.$menu("📥", { scriptPanelLink: BackgroundProject.scripts.update });
           await lib.$menu("📄", { scriptPanelLink: BackgroundProject.scripts.console });
           await lib.$menu("🧾", { scriptPanelLink: BackgroundProject.scripts.searchConsole });
+          if (isDebugEnabled()) {
+            await lib.$menu("🐞", { scriptPanelLink: BackgroundProject.scripts.debugConsole });
+          }
         }
       })
     }
@@ -7848,13 +8586,14 @@ ${content}</tr>
   }
   const DEFAULT_METO_AUTH_CONFIG = {
     server: "https://m.metst.cn",
-    tkUid: "397265",
-    poolId: "2efc793b-661c-1760-d1ad-e51614113424",
-    pp: "9ffb0a9f",
+    tkUid: "",
+    poolId: "",
+    pp: "",
     userId: ""
   };
   const METO_DEFAULT_SERVERS = ["https://m.metst.cn", "https://m.metost.com"];
   const METO_MAX_RETRY_COUNT = 2;
+  const METO_REQUEST_TIMEOUT = 30 * 1e3;
   const COMMON_SETTINGS_NAMESPACE = "common.settings";
   const METO_STORE_KEYS = {
     server: lib.$.namespaceKey(COMMON_SETTINGS_NAMESPACE, "metoServer"),
@@ -7873,7 +8612,7 @@ ${content}</tr>
     return typeof error === "string" ? error : JSON.stringify(error);
   }
   function normalizeQuestion(text) {
-    return String(text || "").replace(/<[^>]+>/g, "").replace(/&nbsp;|&#160;/gi, "").replace(/\s+/g, "").replace(/[[\]（）()【】]/g, "").replace(/[。．.、,，;；:：!！?？]/g, "").trim();
+    return normalizeText(String(text || "").replace(/&nbsp;|&#160;/gi, ""));
   }
   function getMetoServerCandidates(server) {
     const normalizedServer = normalizeMetoServer(server);
@@ -8049,13 +8788,189 @@ ${content}</tr>
       json: parseResponseText(text)
     };
   }
+  function parseChatStream(text) {
+    var _a;
+    let content = "";
+    let reasoning = "";
+    let finishReason;
+    let usage;
+    let error;
+    let sawEvent = false;
+    for (const rawLine of text.split("\n")) {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) {
+        continue;
+      }
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") {
+        continue;
+      }
+      const json = parseResponseText(data);
+      if (!json || typeof json !== "object") {
+        continue;
+      }
+      sawEvent = true;
+      if (json.error) {
+        error = json.error;
+        continue;
+      }
+      const choice = (_a = json.choices) == null ? void 0 : _a[0];
+      const delta = choice == null ? void 0 : choice.delta;
+      if (typeof (delta == null ? void 0 : delta.content) === "string") {
+        content += delta.content;
+      }
+      if (typeof (delta == null ? void 0 : delta.reasoning_content) === "string") {
+        reasoning += delta.reasoning_content;
+      }
+      if (choice == null ? void 0 : choice.finish_reason) {
+        finishReason = choice.finish_reason;
+      }
+      if (json.usage) {
+        usage = json.usage;
+      }
+    }
+    return { sawEvent, content, reasoning, finishReason, usage, error };
+  }
+  function buildChatResponse(url, requestBody, status, text) {
+    const plain = { url, status, requestBody, text, json: parseResponseText(text.trim()) };
+    if (status < 200 || status >= 300) {
+      return plain;
+    }
+    const stream = parseChatStream(text);
+    if (!stream.sawEvent) {
+      return plain;
+    }
+    if (stream.error) {
+      return { url, status: 502, requestBody, text, json: { error: stream.error } };
+    }
+    return {
+      url,
+      status,
+      requestBody,
+      text: stream.content,
+      json: {
+        choices: [
+          {
+            message: { content: stream.content, reasoning_content: stream.reasoning },
+            finish_reason: stream.finishReason
+          }
+        ],
+        usage: stream.usage
+      }
+    };
+  }
+  async function postChatStream(url, body, extraHeaders, limits) {
+    const requestBody = { ...body, stream: true };
+    const headers = {
+      "Content-Type": "application/json; charset=utf-8",
+      Accept: "text/event-stream",
+      ...extraHeaders
+    };
+    const startedAt = Date.now();
+    const gmRequest = globalThis.GM_xmlhttpRequest;
+    if (typeof gmRequest !== "undefined") {
+      return new Promise((resolve, reject) => {
+        let finished = false;
+        let lastActivity2 = Date.now();
+        let sawProgress = false;
+        const touch = () => {
+          sawProgress = true;
+          lastActivity2 = Date.now();
+        };
+        const finish = (action) => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          clearInterval(watchdog2);
+          action();
+        };
+        const abort = () => {
+          var _a;
+          try {
+            (_a = handle == null ? void 0 : handle.abort) == null ? void 0 : _a.call(handle);
+          } catch {
+          }
+        };
+        const watchdog2 = setInterval(() => {
+          const now2 = Date.now();
+          if (now2 - startedAt > limits.totalMs) {
+            finish(() => {
+              abort();
+              reject(new Error(`AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1e3)} 秒）`));
+            });
+          } else if (sawProgress && now2 - lastActivity2 > limits.idleMs) {
+            finish(() => {
+              abort();
+              reject(new Error(`AI 超过 ${Math.round(limits.idleMs / 1e3)} 秒没有返回任何内容`));
+            });
+          }
+        }, 2e3);
+        const handle = gmRequest({
+          url,
+          method: "POST",
+          headers,
+          data: JSON.stringify(requestBody),
+          onprogress: touch,
+          onreadystatechange: touch,
+          onload: (response) => finish(() => resolve(buildChatResponse(url, body, response.status, response.responseText || ""))),
+          onerror: (error) => finish(() => reject(error)),
+          ontimeout: () => finish(() => reject(new Error("请求超时"))),
+          onabort: () => finish(() => reject(new Error("请求已取消")))
+        });
+      });
+    }
+    const controller = new AbortController();
+    let timedOut;
+    let lastActivity = Date.now();
+    const watchdog = setInterval(() => {
+      const now2 = Date.now();
+      if (now2 - startedAt > limits.totalMs) {
+        timedOut = `AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1e3)} 秒）`;
+        controller.abort();
+      } else if (now2 - lastActivity > limits.idleMs) {
+        timedOut = `AI 超过 ${Math.round(limits.idleMs / 1e3)} 秒没有返回任何内容`;
+        controller.abort();
+      }
+    }, 2e3);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+      let text = "";
+      if (response.body && typeof response.body.getReader === "function") {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        for (; ; ) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          lastActivity = Date.now();
+          text += decoder.decode(value, { stream: true });
+        }
+      } else {
+        text = await response.text();
+      }
+      return buildChatResponse(url, body, response.status, text);
+    } catch (error) {
+      throw timedOut ? new Error(timedOut) : error;
+    } finally {
+      clearInterval(watchdog);
+    }
+  }
   async function requestMeto(path, payload, scene, question) {
     const auth = getResolvedMetoAuthConfig();
     if (!auth.tkUid) {
-      throw new Error("MeTo 认证配置缺少 tk_uid，请前往 通用-全局设置 补充。");
+      throw new Error("MeTo 认证配置缺少 tk_uid，请前往 通用-全局设置 填写（点击“MeTo 认证获取教程”查看获取方法）。");
     }
     if (!auth.poolId) {
-      throw new Error("MeTo 认证配置缺少 poolId，请前往 通用-全局设置 补充，或者填写 user_id + pp 自动计算。");
+      throw new Error(
+        "MeTo 认证配置缺少 poolId，请前往 通用-全局设置 填写，或者填写 user_id + pp 自动计算（点击“MeTo 认证获取教程”查看获取方法）。"
+      );
     }
     const servers = getMetoServerCandidates(auth.server);
     let lastResponse;
@@ -8078,7 +8993,7 @@ ${content}</tr>
           }
         });
         try {
-          const response = await postJson(url, requestBody);
+          const response = await postJson(url, requestBody, {}, METO_REQUEST_TIMEOUT);
           lastResponse = response;
           $searchConsole.debug(`[${scene}] ${path} 响应状态 ${response.status}`, {
             url,
@@ -8330,9 +9245,12 @@ ${content}</tr>
     extraBody: lib.$.namespaceKey(COMMON_SETTINGS_NAMESPACE, "aiExtraBody"),
     useImages: lib.$.namespaceKey(COMMON_SETTINGS_NAMESPACE, "aiUseImages"),
     thinking: lib.$.namespaceKey(COMMON_SETTINGS_NAMESPACE, "aiThinking"),
-    webSearch: lib.$.namespaceKey(COMMON_SETTINGS_NAMESPACE, "aiWebSearch")
+    webSearch: lib.$.namespaceKey(COMMON_SETTINGS_NAMESPACE, "aiWebSearch"),
+    maxWait: lib.$.namespaceKey(COMMON_SETTINGS_NAMESPACE, "aiMaxWait")
   };
-  const AI_REQUEST_TIMEOUT = 120 * 1e3;
+  const DEFAULT_AI_MAX_WAIT_SECONDS = 600;
+  const AI_IDLE_TIMEOUT = 120 * 1e3;
+  const AI_MIN_REMAINING_FOR_OPTIONAL = 20 * 1e3;
   const AI_SYSTEM_PROMPT = [
     "你是严谨的题库答题助手。根据给出的题型、题目和选项作答，只输出一个 JSON 对象，不要输出任何其他内容。",
     'JSON 格式：{"answer": "答案", "option": "", "reason": "一句话理由", "confidence": "high", "search_query": "", "insufficient": false}',
@@ -8377,8 +9295,23 @@ ${content}</tr>
       extraBody: String(lib.$store.get(AI_STORE_KEYS.extraBody, "") || "").trim(),
       useImages: lib.$store.get(AI_STORE_KEYS.useImages, true) !== false,
       thinking: lib.$store.get(AI_STORE_KEYS.thinking, true) !== false,
-      webSearch: lib.$store.get(AI_STORE_KEYS.webSearch, true) !== false
+      webSearch: lib.$store.get(AI_STORE_KEYS.webSearch, true) !== false,
+      maxWaitSeconds: normalizeAiMaxWait(lib.$store.get(AI_STORE_KEYS.maxWait, DEFAULT_AI_MAX_WAIT_SECONDS))
     };
+  }
+  function normalizeAiMaxWait(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return DEFAULT_AI_MAX_WAIT_SECONDS;
+    }
+    return Math.min(1800, Math.max(60, Math.round(seconds)));
+  }
+  function getAiExtraWaitSeconds() {
+    const config2 = getAiConfig();
+    return config2.enable ? config2.maxWaitSeconds + 30 : 0;
+  }
+  function syncAiWaitConfig() {
+    AnswerWrapperHandlerConfig.extra_wait_seconds = getAiExtraWaitSeconds();
   }
   function createAiWrapper(url, model) {
     return {
@@ -8465,7 +9398,7 @@ ${content}</tr>
     const config2 = getAiConfig();
     return config2.enable && Boolean(config2.apiKey);
   }
-  const NATIVE_SEARCH_TIMEOUT = 180 * 1e3;
+  const NATIVE_SEARCH_TIMEOUT = 300 * 1e3;
   async function nativeWebSearchAnswer(options) {
     var _a, _b, _c, _d;
     let origin = "";
@@ -8493,7 +9426,7 @@ ${content}</tr>
         messages: [{ role: "user", content }]
       },
       { "x-api-key": options.apiKey, "anthropic-version": "2023-06-01" },
-      NATIVE_SEARCH_TIMEOUT
+      Math.min(NATIVE_SEARCH_TIMEOUT, options.timeoutMs || NATIVE_SEARCH_TIMEOUT)
     );
     if (response.status < 200 || response.status >= 300 || !Array.isArray((_a = response.json) == null ? void 0 : _a.content)) {
       $searchConsole.warn("DeepSeek 原生联网搜索不可用，改为抓取网页搜索", {
@@ -8565,11 +9498,11 @@ ${content}</tr>
     }
     return lines.map((line, index) => `${index + 1}. ${line}`).join("\n").slice(0, 3e3);
   }
-  async function postJsonWithRetry(url, body, headers, timeout) {
+  async function postJsonWithRetry(url, body, headers, timeout, stream = false) {
     let lastError;
     for (let attempt = 0; attempt <= 2; attempt++) {
       try {
-        const response = await postJson(url, body, headers, timeout);
+        const response = stream ? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: timeout }) : await postJson(url, body, headers, timeout);
         const retryable = response.status === 408 || response.status === 409 || response.status === 425 || response.status === 429 || response.status >= 500;
         if (retryable && attempt < 2) {
           $searchConsole.warn(`AI 请求异常（HTTP ${response.status}），准备第 ${attempt + 1} 次重试`);
@@ -8631,7 +9564,7 @@ ${content}</tr>
     return merged.join("\n");
   }
   async function searchAiQuestion(env, scene) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v;
     const config2 = getAiConfig();
     if (!config2.enable) {
       return void 0;
@@ -8642,6 +9575,10 @@ ${content}</tr>
     }
     const url = /\/chat\/completions$/.test(config2.baseUrl) ? config2.baseUrl : `${config2.baseUrl}/chat/completions`;
     const wrapper = createAiWrapper(url, config2.model);
+    const startedAt = Date.now();
+    const maxWaitMs = config2.maxWaitSeconds * 1e3;
+    const remaining = () => Math.max(0, maxWaitMs - (Date.now() - startedAt));
+    const authHeaders = { Authorization: `Bearer ${config2.apiKey}` };
     if (!config2.apiKey) {
       $searchConsole.warn("已开启 AI 答题，但未填写 API Key，请前往 通用-全局设置 配置。");
       return createEmptySearchInfo(wrapper, "未填写 AI API Key");
@@ -8670,9 +9607,11 @@ ${content}</tr>
         const imageUrl = imageUrls[index];
         promptTitle = promptTitle.split(imageUrl).join(`【图片${index + 1}】`);
         promptOptions = promptOptions.split(imageUrl).join(`【图片${index + 1}】`);
-        const dataUrl = await downloadImageAsDataUrl(imageUrl);
-        imageParts.push({ type: "image_url", image_url: { url: dataUrl || imageUrl } });
       }
+      const dataUrls = await Promise.all(imageUrls.map((imageUrl) => downloadImageAsDataUrl(imageUrl)));
+      imageUrls.forEach((imageUrl, index) => {
+        imageParts.push({ type: "image_url", image_url: { url: dataUrls[index] || imageUrl } });
+      });
       if (imageParts.length) {
         const lines = promptOptions.split("\n").map((line) => line.trim()).filter(Boolean);
         const merged = [];
@@ -8776,14 +9715,24 @@ ${searchContext}` : "",
           images: imageParts.length,
           attempt: attempt + 1
         });
-        const response = await postJsonWithRetry(
-          url,
-          requestBody,
-          { Authorization: `Bearer ${config2.apiKey}` },
-          AI_REQUEST_TIMEOUT
-        );
+        if (remaining() < 5e3) {
+          $searchConsole.warn(`AI 答题已超过最长等待时间（${config2.maxWaitSeconds} 秒）: ${title}`);
+          notifyAiFailure(title, `超过最长等待时间 ${config2.maxWaitSeconds} 秒`);
+          return createEmptySearchInfo(wrapper, `AI 答题超过最长等待时间（${config2.maxWaitSeconds} 秒）`);
+        }
+        $debug.log("ai", "开始请求", {
+          title: title.slice(0, 40),
+          attempt: attempt + 1,
+          remainingSeconds: Math.round(remaining() / 1e3)
+        });
+        const response = await postJsonWithRetry(url, requestBody, authHeaders, remaining(), true);
+        $debug.log("ai", "收到响应", {
+          status: response.status,
+          elapsedSeconds: Math.round((Date.now() - startedAt) / 1e3),
+          reasoningChars: String(((_d = (_c = (_b = (_a = response.json) == null ? void 0 : _a.choices) == null ? void 0 : _b[0]) == null ? void 0 : _c.message) == null ? void 0 : _d.reasoning_content) || "").length
+        });
         if (response.status < 200 || response.status >= 300) {
-          const message2 = ((_b = (_a = response.json) == null ? void 0 : _a.error) == null ? void 0 : _b.message) || response.text || `HTTP ${response.status}`;
+          const message2 = ((_f = (_e = response.json) == null ? void 0 : _e.error) == null ? void 0 : _f.message) || response.text || `HTTP ${response.status}`;
           if (response.status === 400 && imageParts.length) {
             $searchConsole.warn(`AI 请求带图片失败，改为仅文字重试: ${message2}`);
             imageParts = [];
@@ -8799,15 +9748,15 @@ ${searchContext}` : "",
           );
           return createEmptySearchInfo(wrapper, `AI 请求失败：${message2}`);
         }
-        const content = String(((_f = (_e = (_d = (_c = response.json) == null ? void 0 : _c.choices) == null ? void 0 : _d[0]) == null ? void 0 : _e.message) == null ? void 0 : _f.content) || "");
+        const content = String(((_j = (_i = (_h = (_g = response.json) == null ? void 0 : _g.choices) == null ? void 0 : _h[0]) == null ? void 0 : _i.message) == null ? void 0 : _j.content) || "");
         const parsed = content ? parseAiContent(content) : void 0;
         if (!parsed) {
-          const choice = (_h = (_g = response.json) == null ? void 0 : _g.choices) == null ? void 0 : _h[0];
+          const choice = (_l = (_k = response.json) == null ? void 0 : _k.choices) == null ? void 0 : _l[0];
           $searchConsole.warn(`AI 返回内容为空或格式错误: ${title}`, {
             finish_reason: choice == null ? void 0 : choice.finish_reason,
-            usage: (_i = response.json) == null ? void 0 : _i.usage,
+            usage: (_m = response.json) == null ? void 0 : _m.usage,
             content: content.slice(0, 200),
-            hasReasoning: Boolean((_j = choice == null ? void 0 : choice.message) == null ? void 0 : _j.reasoning_content)
+            hasReasoning: Boolean((_n = choice == null ? void 0 : choice.message) == null ? void 0 : _n.reasoning_content)
           });
           if (useThinking) {
             useThinking = false;
@@ -8818,7 +9767,7 @@ ${searchContext}` : "",
         let result = parsed;
         let finalResponse = response;
         let searchedQuery = "";
-        if (config2.webSearch && !isVideoQuiz && (!parsed.answer || parsed.confidence === "low")) {
+        if (config2.webSearch && !isVideoQuiz && (!parsed.answer || parsed.confidence === "low") && remaining() >= AI_MIN_REMAINING_FOR_OPTIONAL) {
           const query = parsed.searchQuery || promptTitle;
           $searchConsole.info(`AI 不确定，正在联网搜索: ${query}`, { title });
           let native;
@@ -8828,7 +9777,8 @@ ${searchContext}` : "",
               apiKey: config2.apiKey,
               model: config2.model,
               userText: buildUserText(imageParts),
-              images: imageParts
+              images: imageParts,
+              timeoutMs: remaining()
             });
           } catch (error) {
             native = void 0;
@@ -8839,16 +9789,14 @@ ${searchContext}` : "",
             searchedQuery = native.queries.join(" / ") || query;
           } else {
             const snippets = await searchWeb(query);
-            if (snippets) {
+            if (snippets && remaining() >= AI_MIN_REMAINING_FOR_OPTIONAL) {
               const searchBody = buildRequestBody(imageParts, useThinking, snippets);
               try {
-                const searchResponse = await postJson(
-                  url,
-                  searchBody,
-                  { Authorization: `Bearer ${config2.apiKey}` },
-                  AI_REQUEST_TIMEOUT
-                );
-                const searchContent = String(((_n = (_m = (_l = (_k = searchResponse.json) == null ? void 0 : _k.choices) == null ? void 0 : _l[0]) == null ? void 0 : _m.message) == null ? void 0 : _n.content) || "");
+                const searchResponse = await postChatStream(url, searchBody, authHeaders, {
+                  idleMs: AI_IDLE_TIMEOUT,
+                  totalMs: Math.max(remaining(), 10 * 1e3)
+                });
+                const searchContent = String(((_r = (_q = (_p = (_o = searchResponse.json) == null ? void 0 : _o.choices) == null ? void 0 : _p[0]) == null ? void 0 : _q.message) == null ? void 0 : _r.content) || "");
                 const searchParsed = searchResponse.status >= 200 && searchResponse.status < 300 && searchContent ? parseAiContent(searchContent) : void 0;
                 if (searchParsed == null ? void 0 : searchParsed.answer) {
                   result = searchParsed;
@@ -8875,17 +9823,18 @@ ${searchContext}` : "",
         } else if (blankCount > 1 && answerParts !== blankCount) {
           followHint = `这道填空题共有 ${blankCount} 个空，但你上一次的回答「${result.answer}」只有 ${answerParts} 个答案。请重新作答：answer 恰好包含 ${blankCount} 个答案，按空的先后顺序用 # 连接。`;
         }
-        if (followHint) {
+        if (followHint && remaining() >= AI_MIN_REMAINING_FOR_OPTIONAL) {
           $searchConsole.warn(`AI 的答案不符合题目要求，重新请求: ${title}`, { answer: result.answer, blankCount });
           try {
             const followBody = buildRequestBody(imageParts, useThinking, "", followHint);
             const followResponse = await postJsonWithRetry(
               url,
               followBody,
-              { Authorization: `Bearer ${config2.apiKey}` },
-              AI_REQUEST_TIMEOUT
+              authHeaders,
+              Math.max(remaining(), 10 * 1e3),
+              true
             );
-            const followContent = String(((_r = (_q = (_p = (_o = followResponse.json) == null ? void 0 : _o.choices) == null ? void 0 : _p[0]) == null ? void 0 : _q.message) == null ? void 0 : _r.content) || "");
+            const followContent = String(((_v = (_u = (_t = (_s = followResponse.json) == null ? void 0 : _s.choices) == null ? void 0 : _t[0]) == null ? void 0 : _u.message) == null ? void 0 : _v.content) || "");
             const followParsed = followResponse.status >= 200 && followResponse.status < 300 && followContent ? parseAiContent(followContent) : void 0;
             const followParts = ((followParsed == null ? void 0 : followParsed.answer) || "").split(/#|===|---|\|/).filter((part) => part.trim()).length;
             const accepted = followParsed && (blankCount > 1 ? followParts === blankCount : Boolean(followParsed.option));
@@ -8909,7 +9858,8 @@ ${searchContext}` : "",
           answerText: result.answer,
           reason: result.reason,
           confidence: result.confidence,
-          webSearch: Boolean(searchedQuery)
+          webSearch: Boolean(searchedQuery),
+          elapsedSeconds: Math.round((Date.now() - startedAt) / 1e3)
         });
         return toSearchInfo(
           wrapper,
@@ -8976,16 +9926,44 @@ ${searchContext}` : "",
       optionTexts
     );
   }
-  async function searchAnswerInWrappers(wrappers, env, scene = "auto") {
-    const infos = [];
-    for (const wrapper of wrappers) {
-      if (isMetoWrapper(wrapper)) {
-        infos.push(await searchMetoQuestion(wrapper, env, scene));
-      } else {
-        infos.push(await searchGenericWrapper(wrapper, env, scene));
+  async function searchWrapperWithDeadline(wrapper, env, scene) {
+    const seconds = AnswerWrapperHandlerConfig.timeout_seconds || 60;
+    const startedAt = Date.now();
+    let timer;
+    const work2 = isMetoWrapper(wrapper) ? searchMetoQuestion(wrapper, env, scene) : searchGenericWrapper(wrapper, env, scene);
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        $searchConsole.warn(`${wrapper.name} 超过 ${seconds} 秒没有响应，已放弃`, { question: env.title });
+        resolve(createEmptySearchInfo(wrapper, `题库请求超时（超过 ${seconds} 秒）`));
+      }, seconds * 1e3);
+    });
+    try {
+      const info = await Promise.race([work2, timeout]);
+      $debug.log("answerer", `${wrapper.name} 完成`, {
+        results: info.results.length,
+        error: info.error,
+        elapsedSeconds: Math.round((Date.now() - startedAt) / 100) / 10
+      });
+      return info;
+    } catch (error) {
+      return createEmptySearchInfo(wrapper, stringifyError(error));
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
       }
     }
-    if (!hasCredibleResult(String(env.title || ""), infos, String(env.options || ""))) {
+  }
+  async function searchAnswerInWrappers(wrappers, env, scene = "auto") {
+    const infos = await Promise.all(
+      wrappers.map((wrapper) => searchWrapperWithDeadline(wrapper, env, scene))
+    );
+    const credible = hasCredibleResult(String(env.title || ""), infos, String(env.options || ""));
+    $debug.log("answerer", credible ? "题库已有可信结果" : "题库没有可信结果，尝试 AI 兜底", {
+      title: String(env.title || "").slice(0, 40),
+      wrappers: wrappers.length,
+      results: infos.map((info) => info.results.length)
+    });
+    if (!credible) {
       const aiInfo = await searchAiQuestion(env, scene);
       if (aiInfo) {
         if (aiInfo.results.length) {
@@ -9000,18 +9978,26 @@ ${searchContext}` : "",
   async function searchQuestionsInWrappers(wrappers, questions, baseEnv = {}, scene = "manual-batch") {
     const normalizedQuestions = questions.map((item) => item.trim()).filter(Boolean);
     const results = normalizedQuestions.map((question) => ({ question, infos: [] }));
-    for (const wrapper of wrappers) {
-      if (isMetoWrapper(wrapper)) {
-        const metoResults = await searchMetoQuestions(wrapper, normalizedQuestions, scene);
-        for (const result of metoResults) {
-          const current = results.find((item) => item.question === result.question);
-          if (current) {
-            current.infos.push(...result.infos);
-          }
+    const perWrapper = await Promise.all(
+      wrappers.map(async (wrapper) => {
+        if (isMetoWrapper(wrapper)) {
+          return await searchMetoQuestions(wrapper, normalizedQuestions, scene);
         }
-      } else {
-        for (const result of results) {
-          result.infos.push(await searchGenericWrapper(wrapper, { ...baseEnv, title: result.question }, scene));
+        const list = [];
+        for (const question of normalizedQuestions) {
+          list.push({
+            question,
+            infos: [await searchWrapperWithDeadline(wrapper, { ...baseEnv, title: question }, scene)]
+          });
+        }
+        return list;
+      })
+    );
+    for (const wrapperResults of perWrapper) {
+      for (const result of wrapperResults) {
+        const current = results.find((item) => item.question === result.question);
+        if (current) {
+          current.infos.push(...result.infos);
         }
       }
     }
@@ -9031,6 +10017,30 @@ ${searchContext}` : "",
   }
   let globalControlPanel = null;
   let globalFloatingBar = null;
+  const FLOATING_BAR_ID = "ncp-floating-bar";
+  function getFloatingBarHost() {
+    try {
+      if (window.top && window.top.document) {
+        return window.top.document;
+      }
+    } catch {
+    }
+    return document;
+  }
+  const pausedWorkers = /* @__PURE__ */ new WeakMap();
+  const pauseListeners = /* @__PURE__ */ new Set();
+  function isWorkPaused(worker) {
+    return worker ? pausedWorkers.get(worker) === true : false;
+  }
+  function setWorkPaused(worker, paused) {
+    var _a;
+    if (!worker) {
+      return;
+    }
+    pausedWorkers.set(worker, paused);
+    (_a = worker.emit) == null ? void 0 : _a.call(worker, paused ? "stop" : "continuate");
+    pauseListeners.forEach((listener) => listener(worker, paused));
+  }
   const floatingBtnStyle = {
     padding: "6px 14px",
     border: "none",
@@ -9041,8 +10051,10 @@ ${searchContext}` : "",
     transition: "opacity 0.2s"
   };
   function createFloatingBar(onStartPause, getState) {
+    var _a;
     if (globalFloatingBar)
       globalFloatingBar.remove();
+    (_a = getFloatingBarHost().getElementById(FLOATING_BAR_ID)) == null ? void 0 : _a.remove();
     const pauseBtn = lib.h("button", { style: { ...floatingBtnStyle, background: "#7c4dff" } }, "⏸ 暂停");
     pauseBtn.onclick = () => {
       onStartPause();
@@ -9132,7 +10144,7 @@ ${searchContext}` : "",
         );
       } catch (e) {
         searchResultBox.style.display = "block";
-        searchResultBox.innerHTML = `<span style="color:#ff7b72">搜索失败: ${(e == null ? void 0 : e.message) || e}</span>`;
+        searchResultBox.replaceChildren(lib.h("span", { style: { color: "#ff7b72" } }, `搜索失败: ${(e == null ? void 0 : e.message) || e}`));
       }
       searchBtn.textContent = "搜索";
       searchBtn.removeAttribute("disabled");
@@ -9161,9 +10173,40 @@ ${searchContext}` : "",
     new MutationObserver(() => {
       closeResultBtn.style.display = searchResultBox.style.display === "none" ? "none" : "inline-block";
     }).observe(searchResultBox, { attributes: true, attributeFilter: ["style"] });
+    const COLLAPSE_KEY = "ncp_floating_bar_collapsed";
+    const collapseBtn = lib.h(
+      "button",
+      { style: { ...floatingBtnStyle, background: "#555", padding: "4px 8px", fontSize: "11px" } },
+      ""
+    );
+    const applyCollapsed = (collapsed2) => {
+      [searchInput, searchBtn].forEach((el) => {
+        el.style.display = collapsed2 ? "none" : "";
+      });
+      if (collapsed2) {
+        searchResultBox.style.display = "none";
+      }
+      collapseBtn.textContent = collapsed2 ? "▸" : "▾";
+      collapseBtn.title = collapsed2 ? "展开手动搜题" : "折叠，只保留暂停/继续";
+    };
+    let collapsed = false;
+    try {
+      collapsed = localStorage.getItem(COLLAPSE_KEY) === "1";
+    } catch {
+    }
+    applyCollapsed(collapsed);
+    collapseBtn.onclick = () => {
+      collapsed = !collapsed;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+      } catch {
+      }
+      applyCollapsed(collapsed);
+    };
     const bar = lib.h(
       "div",
       {
+        id: FLOATING_BAR_ID,
         style: {
           position: "fixed",
           bottom: "12px",
@@ -9183,6 +10226,7 @@ ${searchContext}` : "",
       [
         lib.h("span", { style: { color: "#aaa", fontSize: "11px", marginRight: "2px", fontWeight: "bold" } }, "南城派"),
         pauseBtn,
+        collapseBtn,
         searchInput,
         searchBtn,
         closeResultBtn,
@@ -9190,8 +10234,41 @@ ${searchContext}` : "",
       ]
     );
     globalFloatingBar = bar;
-    document.body.appendChild(bar);
+    const host = getFloatingBarHost();
+    (host.body || document.body).appendChild(bar);
     return { bar, btn: pauseBtn };
+  }
+  function attachWorkFloatingBar(worker) {
+    if (!worker) {
+      return void 0;
+    }
+    const control = createFloatingBar(
+      () => setWorkPaused(worker, !isWorkPaused(worker)),
+      () => isWorkPaused(worker)
+    );
+    let finished = false;
+    const listener = (target, paused) => {
+      if (target === worker && !finished) {
+        control.btn.textContent = paused ? "▶ 继续" : "⏸ 暂停";
+      }
+    };
+    pauseListeners.add(listener);
+    const remove = () => {
+      pauseListeners.delete(listener);
+      control.bar.remove();
+      if (globalFloatingBar === control.bar) {
+        globalFloatingBar = null;
+      }
+    };
+    worker.once("done", () => {
+      finished = true;
+      control.btn.textContent = "✓ 完成";
+      control.btn.style.background = "#4caf50";
+      control.btn.onclick = null;
+      setTimeout(remove, 5e3);
+    });
+    window.addEventListener("pagehide", remove);
+    return control;
   }
   function commonWork(script2, options) {
     CommonProject.scripts.render.methods.pin(script2);
@@ -9282,52 +10359,48 @@ ${searchContext}` : "",
       }
       const { container: container2, controlBtn } = createWorkControlPanel();
       (_d = (_c = script2.panel) == null ? void 0 : _c.body) == null ? void 0 : _d.replaceChildren(container2, workResultPanel());
-      let paused = false;
-      const floatingCtrl = createFloatingBar(
-        () => {
-          var _a2;
-          paused = !paused;
-          (_a2 = worker == null ? void 0 : worker.emit) == null ? void 0 : _a2.call(worker, paused ? "stop" : "continuate");
-          controlBtn.value = paused ? "▶️继续" : "⏸️暂停";
-        },
-        () => paused
-      );
+      attachWorkFloatingBar(worker);
       worker == null ? void 0 : worker.once("done", () => {
         running = false;
         globalControlPanel = null;
         controlBtn.disabled = true;
-        floatingCtrl.btn.textContent = "✓ 完成";
-        floatingCtrl.btn.style.background = "#4caf50";
-        floatingCtrl.btn.onclick = null;
-        setTimeout(() => floatingCtrl.bar.remove(), 5e3);
       });
     };
   }
   function createWorkerControl(options) {
-    let stop = false;
     let stopMessage;
     const startBtn = lib.$ui.button("▶️开始答题");
     const restartBtn = lib.$ui.button("🔃重新答题");
     const controlBtn = lib.$ui.button("⏸暂停");
+    const syncState = (worker, paused) => {
+      if (worker !== options.workerProvider()) {
+        return;
+      }
+      controlBtn.value = paused ? "▶️继续" : "⏸️暂停";
+      if (paused) {
+        if (!(stopMessage == null ? void 0 : stopMessage.isConnected)) {
+          stopMessage = lib.$message.warn({ duration: 0, content: "暂停中..." });
+        }
+      } else {
+        stopMessage == null ? void 0 : stopMessage.remove();
+      }
+    };
+    pauseListeners.add(syncState);
     startBtn.onclick = () => {
       startBtn.remove();
       options.onStart();
     };
     restartBtn.onclick = () => {
       stopMessage == null ? void 0 : stopMessage.remove();
+      const worker = options.workerProvider();
+      if (worker) {
+        pausedWorkers.set(worker, false);
+      }
       options.onRestart();
     };
     controlBtn.onclick = () => {
-      var _a;
-      stop = !stop;
       const worker = options.workerProvider();
-      (_a = worker == null ? void 0 : worker.emit) == null ? void 0 : _a.call(worker, stop ? "stop" : "continuate");
-      controlBtn.value = stop ? "▶️继续" : "⏸️暂停";
-      if (stop) {
-        stopMessage = lib.$message.warn({ duration: 0, content: "暂停中..." });
-      } else {
-        stopMessage == null ? void 0 : stopMessage.remove();
-      }
+      setWorkPaused(worker, !isWorkPaused(worker));
     };
     return { startBtn, restartBtn, controlBtn };
   }
@@ -9531,12 +10604,16 @@ ${searchContext}` : "",
         lib.h("span", { className: "question-title-extra-btn", innerText: "🌏百度一下" }, (btn) => {
           btn.onclick = () => {
             popupWin == null ? void 0 : popupWin.close();
-            popupWin = $.createCenteredPopupWindow(`https://www.baidu.com/s?wd=${question}`, "百度搜索", {
-              width: 1e3,
-              height: 800,
-              resizable: true,
-              scrollbars: true
-            });
+            popupWin = $.createCenteredPopupWindow(
+              `https://www.baidu.com/s?wd=${encodeURIComponent(question)}`,
+              "百度搜索",
+              {
+                width: 1e3,
+                height: 800,
+                resizable: true,
+                scrollbars: true
+              }
+            );
           };
         })
       ],
@@ -10008,6 +11085,301 @@ ${searchContext}` : "",
       content
     ]);
   }
+  const SETTINGS_EXPORT_META_KEY = "__ncp_export__";
+  const QUESTION_CACHE_STORE_KEY = "common.apps.localQuestionCaches";
+  function isTransientStoreKey(key) {
+    return key === SETTINGS_EXPORT_META_KEY || key.startsWith("_tab_change_") || key.startsWith("ncp.snapshot.") || key === "list" || /\.(logs|searchLogs)$/.test(key) || /^background\.update\.(lastCheck|notToday|notifiedVersion)$/.test(key);
+  }
+  const SECRET_STORE_KEYS = new Set(
+    [
+      ...["aiApiKey", "metoTkUid", "metoPoolId", "metoPp", "metoUserId"],
+      ...["notificationWebhooks", "answererWrappers"]
+    ].map((name) => "common.settings." + name)
+  );
+  function isSecretStoreKey(key) {
+    return SECRET_STORE_KEYS.has(key);
+  }
+  function downloadTextFile(filename, content) {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 2e3);
+  }
+  function getStoredCacheCount() {
+    const caches = lib.$store.get(QUESTION_CACHE_STORE_KEY, []);
+    return Array.isArray(caches) ? caches.length : 0;
+  }
+  function openExportSettingsDialog() {
+    const cacheCount = getStoredCacheCount();
+    const allKeys = lib.$store.list().filter((key) => !isTransientStoreKey(key));
+    const secretCount = allKeys.filter((key) => isSecretStoreKey(key) && lib.$store.get(key)).length;
+    const cachesBox = lib.h("input", { type: "checkbox", checked: cacheCount > 0, disabled: cacheCount === 0 });
+    const secretsBox = lib.h("input", { type: "checkbox", checked: true, disabled: secretCount === 0 });
+    const warning = lib.h(
+      "div",
+      { style: { color: "#d9534f", fontSize: "12px", margin: "4px 0 0 24px", display: "none" } },
+      "⚠️ 文件中会包含明文的密钥，请只自己保存，不要发给别人。"
+    );
+    const syncWarning = () => {
+      warning.style.display = secretsBox.checked && secretCount > 0 ? "block" : "none";
+    };
+    secretsBox.onchange = syncWarning;
+    syncWarning();
+    const row = (box, title, desc) => lib.h(
+      "label",
+      { style: { display: "flex", alignItems: "flex-start", gap: "8px", margin: "10px 0", cursor: "pointer" } },
+      [box, lib.h("span", [lib.h("b", title), lib.h("div", { style: { fontSize: "12px", opacity: "0.75" } }, desc)])]
+    );
+    lib.$modal.confirm({
+      width: 520,
+      title: "📤 导出设置",
+      content: lib.h("div", { style: { lineHeight: "1.6" } }, [
+        lib.h(
+          "div",
+          "把全局设置、题库配置、各平台学习设置保存为一个文件，换电脑、换浏览器、重装脚本或升级到新版本后，在新版本里“导入设置”即可恢复。"
+        ),
+        row(cachesBox, `包含题库缓存（${cacheCount} 条）`, "缓存很大时文件也会很大；也可以之后在“题库缓存”里单独导出。"),
+        row(
+          secretsBox,
+          `包含密钥和凭证（${secretCount} 项）`,
+          "AI API Key、MeTo 认证信息、通知地址、题库配置。不勾选则导出的文件可以安全分享，导入后需要重新填写这些内容。"
+        ),
+        warning
+      ]),
+      confirmButtonText: "导出",
+      cancelButtonText: "取消",
+      onConfirm: () => {
+        var _a;
+        const includeCaches = cachesBox.checked;
+        const includeSecrets = secretsBox.checked;
+        const data = {};
+        for (const key of allKeys) {
+          if (!includeCaches && key === QUESTION_CACHE_STORE_KEY) {
+            continue;
+          }
+          if (!includeSecrets && isSecretStoreKey(key)) {
+            continue;
+          }
+          const value = lib.$store.get(key);
+          if (value === void 0 || value === null) {
+            continue;
+          }
+          data[key] = value;
+        }
+        const infos = lib.$gm.getInfos();
+        data[SETTINGS_EXPORT_META_KEY] = {
+          app: PROJECT_NAME,
+          version: ((_a = infos == null ? void 0 : infos.script) == null ? void 0 : _a.version) || "",
+          exportedAt: new Date().toISOString(),
+          includeCaches,
+          includeSecrets,
+          count: Object.keys(data).length
+        };
+        const date = new Date().toISOString().slice(0, 10);
+        const filename = `nanchengpai-setting-${date}${includeSecrets ? "" : "-no-secrets"}${PROJECT_SETTING_EXTENSION}`;
+        downloadTextFile(filename, JSON.stringify(data, null, 2));
+        lib.$message.success({ content: `已导出 ${Object.keys(data).length - 1} 项设置：${filename}`, duration: 6 });
+      }
+    });
+  }
+  function openImportSettingsDialog() {
+    const input = lib.h("input", { type: "file", accept: PROJECT_SETTING_IMPORT_ACCEPT });
+    input.onchange = async () => {
+      var _a;
+      const file = (_a = input.files) == null ? void 0 : _a[0];
+      if (!file) {
+        return;
+      }
+      let parsed;
+      try {
+        const value = JSON.parse(await file.text());
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          throw new Error("文件内容不是设置对象");
+        }
+        parsed = value;
+      } catch (error) {
+        lib.$modal.alert({
+          content: lib.h("div", [
+            lib.h("div", "无法读取这个设置文件，请确认它是通过“导出全部设置”生成的（.ncpsetting 或旧版 .ocssetting）。"),
+            lib.h(
+              "div",
+              { style: { marginTop: "6px", opacity: "0.75" } },
+              "原因：" + String(error.message || error)
+            )
+          ])
+        });
+        return;
+      }
+      const meta = parsed[SETTINGS_EXPORT_META_KEY] || {};
+      const keys = Object.keys(parsed).filter((key) => !isTransientStoreKey(key));
+      const cacheItems = normalizeQuestionCacheItems(parsed[QUESTION_CACHE_STORE_KEY]);
+      const settingKeys = keys.filter((key) => key !== QUESTION_CACHE_STORE_KEY);
+      const secretKeys = settingKeys.filter((key) => isSecretStoreKey(key) && parsed[key]);
+      if (settingKeys.length === 0 && cacheItems.length === 0) {
+        lib.$modal.alert({ content: "这个文件里没有可以导入的设置。" });
+        return;
+      }
+      const mergeRadio = lib.h("input", { type: "radio", name: "ncp-cache-mode", value: "merge", checked: true });
+      const replaceRadio = lib.h("input", { type: "radio", name: "ncp-cache-mode", value: "replace" });
+      const radioRow = (radio, text) => lib.h("label", { style: { display: "block", margin: "4px 0", cursor: "pointer" } }, [radio, " " + text]);
+      const exportedAt = meta.exportedAt ? new Date(meta.exportedAt).toLocaleString() : "未知";
+      lib.$modal.confirm({
+        width: 520,
+        title: "📥 导入设置",
+        content: lib.h("div", { style: { lineHeight: "1.7" } }, [
+          lib.h("div", [
+            "文件：",
+            lib.h("b", file.name),
+            lib.h(
+              "div",
+              { style: { fontSize: "12px", opacity: "0.75" } },
+              `来自版本 ${meta.version || "未知"}，导出时间 ${exportedAt}`
+            )
+          ]),
+          lib.h("ul", { style: { margin: "8px 0", paddingLeft: "20px" } }, [
+            lib.h("li", `设置项 ${settingKeys.length} 项（会覆盖当前同名设置，其他设置保持不变）`),
+            lib.h(
+              "li",
+              secretKeys.length ? `其中包含 ${secretKeys.length} 项密钥/凭证（AI Key、MeTo 认证、题库配置等）` : "不包含密钥/凭证"
+            ),
+            lib.h("li", cacheItems.length ? `题库缓存 ${cacheItems.length} 条` : "不包含题库缓存")
+          ]),
+          ...cacheItems.length ? [
+            lib.h("div", { style: { marginTop: "8px" } }, [
+              lib.h("b", "题库缓存的处理方式："),
+              radioRow(mergeRadio, `合并（推荐）：保留当前缓存，追加文件中的 ${cacheItems.length} 条`),
+              radioRow(replaceRadio, "覆盖：丢弃当前缓存，只保留文件中的缓存")
+            ])
+          ] : [],
+          lib.h("div", { style: { marginTop: "8px", fontSize: "12px", opacity: "0.75" } }, "导入完成后页面会自动刷新。")
+        ]),
+        confirmButtonText: "导入并刷新",
+        cancelButtonText: "取消",
+        onConfirm: async () => {
+          let applied = 0;
+          for (const key of settingKeys) {
+            lib.$store.set(key, parsed[key]);
+            applied++;
+          }
+          if (cacheItems.length) {
+            if (replaceRadio.checked) {
+              lib.$store.set(QUESTION_CACHE_STORE_KEY, []);
+              invalidateQuestionCacheIndex();
+            }
+            await CommonProject.scripts.apps.methods.addQuestionCache(...cacheItems);
+          }
+          invalidateQuestionCacheIndex();
+          lib.$message.success({
+            content: `已导入 ${applied} 项设置${cacheItems.length ? `和 ${cacheItems.length} 条题库缓存` : ""}，页面即将刷新。`,
+            duration: 3
+          });
+          setTimeout(() => location.reload(), 2e3);
+        }
+      });
+    };
+    input.click();
+  }
+  let questionCacheIndex;
+  let questionCacheIndexListening = false;
+  function invalidateQuestionCacheIndex() {
+    questionCacheIndex = void 0;
+  }
+  function getQuestionCacheIndex(read) {
+    if (!questionCacheIndex) {
+      const index = /* @__PURE__ */ new Map();
+      for (const cache of read() || []) {
+        const key = normalizeCacheTitle(cache.title);
+        const list = index.get(key);
+        if (list) {
+          list.push(cache);
+        } else {
+          index.set(key, [cache]);
+        }
+      }
+      questionCacheIndex = index;
+    }
+    return questionCacheIndex;
+  }
+  function showMetoGuide() {
+    lib.$modal.simple({
+      width: 640,
+      content: lib.h("div", { style: { lineHeight: "1.7", fontSize: "13px" } }, [
+        lib.h("h3", { style: { margin: "0 0 8px" } }, "MeTo 认证信息获取教程"),
+        lib.$ui.notes([
+          "出于安全考虑，南城派不再内置任何默认的 MeTo 账号，需要填写你自己的认证信息。",
+          "MeTo 官方文档站（doc.metst.cn）目前没有公开说明如何获取这些值，下面的方法是根据 MeTo 的请求格式整理的，请按实际页面情况操作。"
+        ]),
+        lib.h("ol", { style: { paddingLeft: "20px" } }, [
+          lib.h("li", [
+            "安装并登录 MeTo 官方脚本（官网 ",
+            lib.h("a", { href: "https://doc.metst.cn", target: "_blank" }, "doc.metst.cn"),
+            "）。登录使用邮箱，登录邮件里的链接需要在“已安装脚本的浏览器”中打开。"
+          ]),
+          lib.h("li", "打开任意网课答题页面，让 MeTo 官方脚本执行一次搜题。"),
+          lib.h("li", "按 F12 打开开发者工具，切换到“网络（Network）”，在筛选框输入 queryProblems。"),
+          lib.h("li", "点击这条请求，在“载荷（Payload）/请求负载”里可以看到 JSON，其中："),
+          lib.h("ul", { style: { paddingLeft: "20px" } }, [
+            lib.h("li", [lib.h("b", "userId"), " 的值 → 填入本页的 ", lib.h("b", "tk_uid")]),
+            lib.h("li", [lib.h("b", "poolId"), " 的值 → 填入本页的 ", lib.h("b", "poolId")])
+          ]),
+          lib.h("li", "回到 通用 → 全局设置，填入后即可使用（无需刷新页面，下一次搜题生效）。")
+        ]),
+        lib.$ui.notes([
+          "pp 和 user_id 是可选项：只有拿不到 poolId 时才需要，poolId = md5(md5(user_id) + pp)，可以点击“重算 MeTo poolId”自动计算。",
+          "这些值等同于你的账号凭证，请不要分享给别人，也不要把包含它们的“导出全部设置”文件发给别人。"
+        ])
+      ])
+    });
+  }
+  function confirmCustomHandlers(wrappers) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (value) => {
+        if (!settled) {
+          settled = true;
+          resolve(value);
+        }
+      };
+      const hostOf = (url) => {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return url || "未知地址";
+        }
+      };
+      lib.$modal.confirm({
+        width: 600,
+        title: "⚠️ 请确认题库配置来源",
+        content: lib.h("div", { style: { lineHeight: "1.7" } }, [
+          lib.h(
+            "div",
+            "题库配置里的 handler 是一段会在你的浏览器中执行的代码（用来解析题库返回的内容）。恶意的配置可以借此读取脚本保存的数据，包括 AI API Key。"
+          ),
+          lib.h("div", { style: { margin: "8px 0" } }, "请只使用来自可信来源的配置。本次将保存以下题库："),
+          lib.h(
+            "ul",
+            { style: { paddingLeft: "20px" } },
+            wrappers.map((wrapper) => lib.h("li", `${wrapper.name || "未命名题库"}（${hostOf(wrapper.url)}）`))
+          )
+        ]),
+        confirmButtonText: "我已确认来源可信，保存",
+        cancelButtonText: "取消",
+        onConfirm: () => settle(true),
+        onCancel: () => settle(false),
+        onClose: () => {
+          setTimeout(() => settle(false), 50);
+        }
+      });
+    });
+  }
   const CommonProject = lib.Project.create({
     name: "通用",
     domains: [],
@@ -10193,12 +11565,14 @@ ${searchContext}` : "",
                                 select.value = "默认";
                                 const metoConfig = getResolvedMetoAuthConfig();
                                 if (!metoConfig.tkUid) {
-                                  lib.$modal.alert({ content: "MeTo 认证缺少 tk_uid，请先在全局设置中填写。" });
+                                  lib.$modal.alert({
+                                    content: "MeTo 认证缺少 tk_uid，请先在 通用 -> 全局设置 中填写，点击“MeTo 认证获取教程”查看获取方法。"
+                                  });
                                   return;
                                 }
                                 if (!metoConfig.poolId) {
                                   lib.$modal.alert({
-                                    content: "MeTo 认证缺少 poolId，请填写 poolId，或者填写 user_id + pp 后重新计算。"
+                                    content: "MeTo 认证缺少 poolId，请填写 poolId，或者填写 user_id + pp 后重新计算。点击“MeTo 认证获取教程”查看获取方法。"
                                   });
                                   return;
                                 }
@@ -10241,6 +11615,9 @@ ${searchContext}` : "",
                                 const contents = value.split("###").map((i) => i.trim()).filter(Boolean);
                                 for (const content of contents) {
                                   awsResult.push(...await AnswerWrapperParser.from(content));
+                                }
+                                if (awsResult.length && await confirmCustomHandlers(awsResult) === false) {
+                                  return;
                                 }
                               }
                               if (awsResult.length === 0) {
@@ -10343,21 +11720,21 @@ ${searchContext}` : "",
           },
           metoTkUid: {
             label: "MeTo tk_uid (ti_uid)",
-            defaultValue: "397265",
+            defaultValue: "",
             attrs: {
               title: "MeTo 题库认证中的 tk_uid / ti_uid。"
             }
           },
           metoPoolId: {
             label: "MeTo poolId",
-            defaultValue: "2efc793b-661c-1760-d1ad-e51614113424",
+            defaultValue: "",
             attrs: {
               title: "MeTo 题库认证中的 poolId。留空时可通过 user_id + pp 自动计算。"
             }
           },
           metoPp: {
             label: "MeTo pp (密钥种子)",
-            defaultValue: "9ffb0a9f",
+            defaultValue: "",
             attrs: {
               title: "MeTo 题库认证中的 pp，用于重新计算 poolId。"
             }
@@ -10388,6 +11765,17 @@ ${searchContext}` : "",
                 );
                 lib.$message.success({ content: "MeTo poolId 已重新计算。" });
               };
+            }
+          },
+          metoGuide: {
+            label: "MeTo 认证获取教程",
+            defaultValue: "查看教程",
+            attrs: {
+              type: "button",
+              title: "南城派不再内置 MeTo 账号，点击查看如何获取自己的 tk_uid 和 poolId。"
+            },
+            onload() {
+              this.onclick = () => showMetoGuide();
             }
           },
           aiEnable: {
@@ -10448,6 +11836,18 @@ ${searchContext}` : "",
             attrs: {
               type: "checkbox",
               title: "AI 没有把握（信心不足或给不出答案）时，自动联网搜索后再作答。优先使用 DeepSeek 原生联网搜索（服务端多轮搜索，较慢且更耗额度），不可用时回退为抓取 Bing / DuckDuckGo 网页结果。"
+            }
+          },
+          aiMaxWait: {
+            label: "AI 单题最长等待（秒）",
+            defaultValue: DEFAULT_AI_MAX_WAIT_SECONDS,
+            showIf: "common.settings.aiEnable",
+            attrs: {
+              type: "number",
+              min: 60,
+              max: 1800,
+              step: 30,
+              title: "AI 思考、联网搜索、重试的总时限，超过后放弃这道题。深度思考的复杂题可能需要几分钟，默认 600 秒。AI 使用流式传输，只要仍在输出内容就不会被误判为卡死。"
             }
           },
           aiExtraBody: {
@@ -10528,6 +11928,15 @@ ${searchContext}` : "",
             attrs: {
               type: "checkbox",
               title: "超星章节测试/作业页未全部完成时，自动随机补答未完成题目并强制提交；提交后尝试查看正确答案、写入本地题库缓存，再点击重做并用缓存答案重新答题。"
+            }
+          },
+          "chapterTest-autoRetake-exam": {
+            defaultValue: false,
+            label: "(仅超星)考试也允许错题回填重答",
+            showIf: "common.settings.chapterTest-autoRetake",
+            attrs: {
+              type: "checkbox",
+              title: "默认只对作业/章节测验生效。开启后，考试页面在有题没搜到答案时也会用随机答案提交以查看正确答案并重做。考试通常只能提交一次，随机答案提交后没有重新作答的机会，请谨慎开启；每次开始前还会再次确认。"
             }
           },
           advancedSettings: {
@@ -10738,6 +12147,9 @@ ${searchContext}` : "",
           this.onConfigChange("answerWrapperHandlerTimeout", (sec) => {
             AnswerWrapperHandlerConfig.timeout_seconds = sec;
           });
+          syncAiWaitConfig();
+          this.onConfigChange("aiEnable", () => syncAiWaitConfig());
+          this.onConfigChange("aiMaxWait", () => syncAiWaitConfig());
           const checkShutdown = () => {
             if (this.cfg.scheduledShutdown && this.cfg.shutdownTime) {
               const now2 = new Date();
@@ -11309,6 +12721,7 @@ ${searchContext}` : "",
                 }
               }
               this.cfg.localQuestionCaches = questionCaches;
+              invalidateQuestionCacheIndex();
             },
             addQuestionCacheFromWorkResult(swr) {
               const scope = getQuestionCacheScope();
@@ -11335,6 +12748,7 @@ ${searchContext}` : "",
               );
             },
             searchAnswerInCaches: async (title, whenSearchEmpty, optionTexts = []) => {
+              var _a;
               if (CommonProject.scripts.settings.cfg.enableQuestionCaches === false) {
                 return await whenSearchEmpty();
               }
@@ -11342,15 +12756,18 @@ ${searchContext}` : "",
               const scope = getQuestionCacheScope();
               const titleKey = normalizeCacheTitle(title);
               const allowCrossCourse = Boolean(CommonProject.scripts.settings.cfg.cacheCrossCourse);
-              let caches = this.cfg.localQuestionCaches.filter(
-                (cache) => normalizeCacheTitle(cache.title) === titleKey && (allowCrossCourse || !scope || !cache.scope || cache.scope === scope)
-              );
+              if (!questionCacheIndexListening) {
+                questionCacheIndexListening = true;
+                this.onConfigChange("localQuestionCaches", () => invalidateQuestionCacheIndex());
+              }
+              let caches = ((_a = (questionCacheIndex || getQuestionCacheIndex(() => this.cfg.localQuestionCaches)).get(titleKey)) == null ? void 0 : _a.filter((cache) => allowCrossCourse || !scope || !cache.scope || cache.scope === scope)) || [];
               const junkCaches = caches.filter((c) => isBlankAnswerJunk(c.answer));
               if (junkCaches.length) {
                 const isJunk = (c) => normalizeCacheTitle(c.title) === titleKey && isBlankAnswerJunk(c.answer);
                 this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
                   (c) => !isJunk(c)
                 );
+                invalidateQuestionCacheIndex();
                 caches = caches.filter((c) => !isBlankAnswerJunk(c.answer));
               }
               caches = caches.map(
@@ -11372,9 +12789,17 @@ ${searchContext}` : "",
                   this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
                     (c) => !isStale(c)
                   );
+                  invalidateQuestionCacheIndex();
                 }
                 caches = [];
               }
+              $debug.log("cache", caches.length ? "命中题库缓存" : "题库缓存未命中，改为在线搜题", {
+                title: title.slice(0, 40),
+                hits: caches.length,
+                sources: caches.map((c) => getQuestionCacheSource(c)),
+                scope,
+                crossCourse: allowCrossCourse
+              });
               for (const cache of caches) {
                 const source = getQuestionCacheSource(cache);
                 results.push({
@@ -11587,6 +13012,7 @@ ${searchContext}` : "",
                           this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
                             (cache) => !same(cache)
                           );
+                          invalidateQuestionCacheIndex();
                           await removeFromRetakeTab(same);
                           render2();
                         };
@@ -11673,6 +13099,7 @@ ${searchContext}` : "",
                             this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
                               (cache) => getQuestionCacheSource(cache) !== "ai"
                             );
+                            invalidateQuestionCacheIndex();
                             await removeFromRetakeTab((cache) => getQuestionCacheSource(cache) === "ai");
                             render2();
                             lib.$message.success({ content: "已清除全部 AI 答案缓存。", duration: 5 });
@@ -11684,6 +13111,7 @@ ${searchContext}` : "",
                               content: "确定要清空全部题库缓存吗？此操作无法撤销，建议先导出备份。",
                               onConfirm: async () => {
                                 this.cfg.localQuestionCaches = [];
+                                invalidateQuestionCacheIndex();
                                 try {
                                   await lib.$store.setTab(CX_CHAPTER_RETAKE_CACHE_TAB_KEY$1, []);
                                 } catch {
@@ -11709,25 +13137,11 @@ ${searchContext}` : "",
               {
                 innerText: "📤 导出全部设置",
                 style: btnStyle,
-                title: `导出全部页面的设置，包括全局设置，题库配置，学习设置等等。（文件后缀名为：${PROJECT_SETTING_EXTENSION}）`
+                title: `导出设置，包括全局设置、题库配置、各平台学习设置等，可选择是否包含题库缓存和密钥。换电脑或重装脚本后可导入恢复。（文件后缀名为：${PROJECT_SETTING_EXTENSION}）`
               },
               (btn) => {
                 btn.onclick = () => {
-                  const setting = /* @__PURE__ */ Object.create({});
-                  for (const key of lib.$store.list()) {
-                    const val = lib.$store.get(key);
-                    if (val) {
-                      Reflect.set(setting, key, val);
-                    }
-                  }
-                  const blob = new Blob([JSON.stringify(setting, null, 2)], { type: "text/plain" });
-                  const url = URL.createObjectURL(blob);
-                  const a = lib.h("a", {
-                    href: url,
-                    download: `nanchengpai-setting-export${PROJECT_SETTING_EXTENSION}`
-                  });
-                  a.click();
-                  URL.revokeObjectURL(url);
+                  openExportSettingsDialog();
                 };
               }
             )
@@ -11738,27 +13152,11 @@ ${searchContext}` : "",
               {
                 innerText: "📥 导入全部设置",
                 style: btnStyle,
-                title: `导入并且覆盖当前的全部设置。（文件后缀名优先为：${PROJECT_SETTING_EXTENSION}，同时兼容旧版 .ocssetting）`
+                title: `导入设置文件，导入前会显示内容概要并让你确认。（文件后缀名优先为：${PROJECT_SETTING_EXTENSION}，同时兼容旧版 .ocssetting）`
               },
               (btn) => {
                 btn.onclick = () => {
-                  const input = lib.h("input", { type: "file", accept: PROJECT_SETTING_IMPORT_ACCEPT });
-                  input.onchange = async () => {
-                    var _a;
-                    const file = (_a = input.files) == null ? void 0 : _a[0];
-                    if (file) {
-                      const setting = await file.text();
-                      const obj = JSON.parse(setting);
-                      for (const key of Object.keys(obj)) {
-                        lib.$store.set(key, obj[key]);
-                      }
-                      lib.$message.success({ content: "设置导入成功，页面即将刷新。", duration: 3 });
-                      setTimeout(() => {
-                        location.reload();
-                      }, 3e3);
-                    }
-                  };
-                  input.click();
+                  openImportSettingsDialog();
                 };
               }
             )
@@ -11773,7 +13171,18 @@ ${searchContext}` : "",
           });
           const sep = (text) => lib.h("div", { className: "separator", style: { padding: "4px 0px" } }, text);
           panel.body.replaceChildren(
-            lib.h("div", [sep("题库拓展"), cachesBtn, sep("其他功能"), exportSetting, importSetting])
+            lib.h("div", [
+              sep("题库拓展"),
+              cachesBtn,
+              sep("设置备份与迁移"),
+              exportSetting,
+              importSetting,
+              lib.h(
+                "div",
+                { style: { fontSize: "12px", opacity: "0.75", padding: "4px 8px", lineHeight: "1.6" } },
+                "换电脑、换浏览器、重装脚本或升级前先“导出设置”，在新版本里“导入设置”即可恢复；脚本自动更新不会丢失设置。"
+              )
+            ])
           );
         }
       })
@@ -13012,6 +14421,7 @@ ${searchContext}` : "",
                   return;
                 }
                 playMedia(() => video == null ? void 0 : video.play()).then(() => {
+                  lib.$store.setTab("reload-count", 0);
                   const cn = getChapterName();
                   lib.$message.info({ content: "正在学习：" + cn });
                   $console.log("正在学习：" + cn);
@@ -13445,6 +14855,7 @@ ${searchContext}` : "",
               }
             }, 3e3);
             playMedia(() => video == null ? void 0 : video.play()).then(() => {
+              lib.$store.setTab("reload-count", 0);
               const current = document.querySelector(
                 ".chapter-item.current , .chapter-content-second.current"
               );
@@ -13638,6 +15049,7 @@ ${searchContext}` : "",
               }
             }, 3e3);
             playMedia(() => video == null ? void 0 : video.play()).then(() => {
+              lib.$store.setTab("reload-count", 0);
               const cn = getChapterName();
               lib.$message.info({ content: "正在学习：" + cn });
               $console.log("正在学习：" + cn);
@@ -13735,7 +15147,8 @@ ${searchContext}` : "",
         }
         return state$4.study.currentMedia;
       } catch (e) {
-        return await reload(e);
+        $console.error(e);
+        return void 0;
       }
     };
     lib.$message.info("开始播放");
@@ -13759,7 +15172,9 @@ ${searchContext}` : "",
         actions.onended({ next: false });
       }
     }, 3e3);
-    playMedia(() => video == null ? void 0 : video.play());
+    playMedia(() => video == null ? void 0 : video.play()).then(() => {
+      lib.$store.setTab("reload-count", 0);
+    });
     video.onpause = async () => {
       if (!(video == null ? void 0 : video.ended) && state$4.study.stop === false) {
         await waitForCaptcha();
@@ -14209,7 +15624,7 @@ ${searchContext}` : "",
       }
       let count = 0;
       while (worker.isClose === false) {
-        await worker.doWork({ enable_debug: true });
+        await worker.doWork({ enable_debug: isDebugEnabled() });
         next2 = getNextBtn();
         if (!next2) {
           break;
@@ -14431,7 +15846,7 @@ ${searchContext}` : "",
         await lib.$.sleep(3e3);
       }
       while (next2 && worker.isClose === false) {
-        await worker.doWork({ enable_debug: true });
+        await worker.doWork({ enable_debug: isDebugEnabled() });
         next2 = getNextBtn();
         if (next2) {
           await lib.$.sleep(1e3);
@@ -17512,10 +18927,57 @@ ${searchContext}` : "",
       })
     }
   });
+  function confirmExamRetake() {
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (value) => {
+        if (!settled) {
+          settled = true;
+          resolve(value);
+        }
+      };
+      lib.$modal.confirm({
+        width: 560,
+        title: "⚠️ 考试页面启用错题回填重答",
+        maskCloseable: false,
+        content: lib.h("div", { style: { lineHeight: "1.7" } }, [
+          lib.h("div", "当前是考试页面，并且你开启了“考试也允许错题回填重答”。"),
+          lib.h(
+            "div",
+            { style: { margin: "8px 0" } },
+            "如果有题目没有搜到答案，脚本会先用随机答案补满并提交考试，再查看正确答案、重做一次。"
+          ),
+          lib.h("div", [lib.h("b", "考试通常只能提交一次"), "，提交后可能没有重做机会，成绩将以这次提交为准。"]),
+          lib.h("div", { style: { marginTop: "8px" } }, "选择“不允许”将只正常答题，不会用随机答案提交。")
+        ]),
+        confirmButtonText: "允许，随机答案提交",
+        cancelButtonText: "不允许（仅答题）",
+        onConfirm: () => settle(true),
+        onCancel: () => settle(false),
+        onClose: () => {
+          setTimeout(() => settle(false), 50);
+        }
+      });
+    });
+  }
   function workOrExam$1(type = "work", options) {
     const { answererWrappers, period, thread, redundanceWordsText, answerSeparators, answerMatchMode, preview_mode } = options;
     const cxAutoRetakeDepth = options.cxAutoRetakeDepth || 0;
-    const cxAutoRetakeEnabled = Boolean(CommonProject.scripts.settings.cfg["chapterTest-autoRetake"]) && cxAutoRetakeDepth === 0;
+    let cxAutoRetakeEnabled = Boolean(CommonProject.scripts.settings.cfg["chapterTest-autoRetake"]) && cxAutoRetakeDepth === 0;
+    let examRetakeGate = Promise.resolve();
+    if (cxAutoRetakeEnabled && type === "exam") {
+      if (!CommonProject.scripts.settings.cfg["chapterTest-autoRetake-exam"]) {
+        cxAutoRetakeEnabled = false;
+        $console.info("当前是考试页面：“错题回填重答”默认不对考试生效，如需使用请在 通用-全局设置 中单独开启。");
+      } else {
+        examRetakeGate = confirmExamRetake().then((allowed) => {
+          if (!allowed) {
+            cxAutoRetakeEnabled = false;
+            $console.info("已选择不允许考试使用随机答案提交，本次只正常答题。");
+          }
+        });
+      }
+    }
     lib.$message.info(`开始${type === "work" ? "作业" : "考试"}`);
     const restoreCachesTask = restoreChapterRetakeCaches();
     if (preview_mode) {
@@ -17666,7 +19128,8 @@ ${searchContext}` : "",
     if (preview_mode) {
       Promise.resolve().then(async () => {
         await restoreCachesTask;
-        return worker.doWork();
+        await examRetakeGate;
+        return worker.doWork({ enable_debug: isDebugEnabled() });
       }).then(async (results) => {
         reportUnfinishedQuestions(results, "作业/考试");
         const hasUnfinishedResults = results.some((result) => {
@@ -17704,9 +19167,26 @@ ${searchContext}` : "",
       const getNextBtn = () => document.querySelector('[onclick="getTheNextQuestion(1)"]');
       let next2 = getNextBtn();
       (async () => {
+        var _a;
         await restoreCachesTask;
-        while (next2 && worker.isClose === false) {
-          await worker.doWork({ enable_debug: true });
+        let lastQuestionKey = "";
+        let loops = 0;
+        while (next2 && worker.isClose === false && loops++ < 500) {
+          const questionKey = (((_a = document.querySelector(".questionLi")) == null ? void 0 : _a.textContent) || "").replace(/\s+/g, "").slice(0, 200);
+          if (questionKey && questionKey === lastQuestionKey) {
+            const msg = "点击“下一题”后题目没有变化，已停止自动答题，请手动检查。";
+            $console.warn(msg);
+            lib.$message.warn({ content: msg, duration: 0 });
+            $debug.warn("cx.work", "下一题按钮没有生效，停止循环", { loops });
+            break;
+          }
+          lastQuestionKey = questionKey;
+          try {
+            await worker.doWork({ enable_debug: isDebugEnabled() });
+          } catch (error) {
+            $console.warn("答题过程出错：" + String(error));
+            break;
+          }
           await $.sleep(1e3);
           next2 = getNextBtn();
           next2 == null ? void 0 : next2.click();
@@ -17985,15 +19465,30 @@ ${searchContext}` : "",
       }
     };
     await runJobs();
+    $debug.log("cx.study", "任务点处理结束", {
+      searched: searchedJobs.length,
+      attachmentTotal,
+      mode: opts.mode
+    });
     top._preChapterId = "";
     const next2 = async () => {
       const sectionTabs = Array.from((top == null ? void 0 : top.document.querySelectorAll(".prev_ul li")) || []);
       const activeTabIndex = sectionTabs.findIndex((tab) => tab.classList.contains("active"));
+      $debug.log("cx.next", "准备跳转", {
+        mode: CXProject.scripts.study.cfg.mode,
+        tabs: sectionTabs.map((tab) => tab.className.trim() || "-"),
+        activeTabIndex,
+        isInFinalTab: CXAnalyses.isInFinalTab(),
+        isInFinalChapter: Boolean(CXAnalyses.isInFinalChapter())
+      });
       if (sectionTabs.length > 1 && activeTabIndex !== -1 && activeTabIndex < sectionTabs.length - 1) {
         const tabMsg = `本章共 ${sectionTabs.length} 个小节，当前第 ${activeTabIndex + 1} 个已完成，即将切换到下一个小节。`;
         $console.info(tabMsg);
         lib.$message.info({ content: tabMsg, duration: 5 });
         await $.sleep(500);
+        if (skipInDryRun("切换到下一个小节", "cx.next")) {
+          return;
+        }
         sectionTabs[activeTabIndex + 1].click();
         return;
       }
@@ -18061,6 +19556,9 @@ ${searchContext}` : "",
           if (nextChapter) {
             const target = nextChapter;
             CXAnalyses.scrollToActiveChapter();
+            if (skipInDryRun("跳转到下一个未完成章节", "cx.next")) {
+              return;
+            }
             setTimeout(() => {
               var _a2;
               (_a2 = target.querySelector(".posCatalog_name")) == null ? void 0 : _a2.click();
@@ -18084,7 +19582,26 @@ ${searchContext}` : "",
           top._preChapterId = curChapterId.value;
           CXAnalyses.scrollToActiveChapter();
           await $.sleep(200);
+          if (skipInDryRun("跳转到下一节", "cx.next")) {
+            return;
+          }
+          const before = readCxPosition();
           top == null ? void 0 : top.PCount.next(count.length.toString(), curChapterId.value, curCourseId.value, curClazzId.value, "");
+          if (!await waitForCxPositionChange(before, 10 * 1e3)) {
+            $console.warn("调用超星跳转后页面没有变化，尝试点击页面上的“下一节”按钮。");
+            $debug.warn("cx.next", "PCount.next 没有生效，尝试点击下一节按钮", before);
+            const nextBtn = top == null ? void 0 : top.document.querySelector("#prevNextFocusNext");
+            nextBtn == null ? void 0 : nextBtn.click();
+            if (!await waitForCxPositionChange(before, 8 * 1e3)) {
+              const content = "自动跳转没有生效（可能是页面弹窗拦截了跳转，或网络异常），请手动点击“下一节”。";
+              $console.error(content);
+              lib.$message.error({ content, duration: 0 });
+              CommonProject.scripts.settings.methods.notificationBySetting(content, {
+                duration: 0,
+                extraTitle: "超星学习通学习脚本"
+              });
+            }
+          }
         } else {
           $console.warn("参数错误，无法跳转下一章，请尝试手动切换。");
         }
@@ -18097,12 +19614,36 @@ ${searchContext}` : "",
       lib.$message.success({ content: msg });
       $console.info(msg);
       await $.sleep(2e3);
-      next2();
+      next2().catch((error) => {
+        $console.error("自动跳转时出错：" + String(error));
+        $debug.error("cx.next", "跳转过程出错", String(error));
+      });
     } else {
       const msg = "页面任务点已完成，自动跳转已关闭，请手动跳转。";
       lib.$message.warn({ content: msg, duration: 0 });
       $console.warn(msg);
     }
+  }
+  function readCxPosition() {
+    var _a, _b, _c;
+    const tabs = Array.from((top == null ? void 0 : top.document.querySelectorAll(".prev_ul li")) || []);
+    return {
+      chapterId: ((_a = top == null ? void 0 : top.document.querySelector("#curChapterId")) == null ? void 0 : _a.value) || "",
+      activeCatalog: ((_b = top == null ? void 0 : top.document.querySelector(".posCatalog_active")) == null ? void 0 : _b.getAttribute("id")) || "",
+      activeTab: tabs.findIndex((tab) => tab.classList.contains("active")),
+      cardId: ((_c = top == null ? void 0 : top.document.querySelector(".prev_ul li.active")) == null ? void 0 : _c.getAttribute("cardid")) || ""
+    };
+  }
+  async function waitForCxPositionChange(before, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await $.sleep(500);
+      const now2 = readCxPosition();
+      if (now2.chapterId !== before.chapterId || now2.activeCatalog !== before.activeCatalog || now2.activeTab !== before.activeTab || now2.cardId !== before.cardId) {
+        return true;
+      }
+    }
+    return false;
   }
   function reportUnfinishedQuestions(results, label) {
     const unfinished = results.map((item, index) => ({ item, number: index + 1 })).filter(({ item }) => {
@@ -18270,6 +19811,13 @@ ${searchContext}` : "",
               }
             }
           }
+          $debug.log("cx.job", func ? "将执行任务点" : "不执行任务点", {
+            name: jobName,
+            kind: videojs ? "video" : chapterTest ? "chapterTest" : read ? "read" : pptWithAudio ? "ppt" : "hyperlink",
+            work_type,
+            retryLater,
+            mid: attachment.property.mid
+          });
           const job2 = {
             mid: attachment.property.mid,
             attachment,
@@ -18441,6 +19989,21 @@ ${searchContext}` : "",
         loop();
       }
       return new Promise((resolve, reject) => {
+        let finished = false;
+        let lastTime = media.currentTime;
+        let lastProgressAt = Date.now();
+        let stallRecovered = false;
+        const finish = (action) => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          quizLoopStopped = true;
+          clearInterval(reloadInterval);
+          clearInterval(stallInterval);
+          media.removeEventListener("pause", playFunction);
+          action();
+        };
         const reloadInterval = setInterval(() => {
           const errorDiv = doc.querySelector(".vjs-modal-dialog-content");
           if (["视频文件损坏", "网络错误导致视频下载中途失败", "视频因格式不支持", "网络的问题无法加载"].some(
@@ -18448,9 +20011,32 @@ ${searchContext}` : "",
           )) {
             $console.error("检测到视频加载失败，即将跳过视频。");
             lib.$message.error("检测到视频加载失败，即将跳过视频。");
-            setTimeout(resolve, 3e3);
+            $debug.warn("cx.media", "视频加载失败，跳过", { text: errorDiv == null ? void 0 : errorDiv.innerText.slice(0, 80) });
+            finish(() => setTimeout(resolve, 3e3));
           }
         }, 3e3);
+        const stallInterval = setInterval(() => {
+          if (media.ended || media.paused || Math.abs(media.currentTime - lastTime) > 0.1) {
+            lastTime = media.currentTime;
+            lastProgressAt = Date.now();
+            return;
+          }
+          const stalledSeconds = (Date.now() - lastProgressAt) / 1e3;
+          if (stalledSeconds >= 180) {
+            const msg = "视频长时间没有播放进度，已跳过该视频，请检查网络后手动补学。";
+            $console.error(msg);
+            lib.$message.error({ content: msg, duration: 10 });
+            $debug.error("cx.media", "播放进度长时间没有变化，跳过", { stalledSeconds, currentTime: media.currentTime });
+            finish(() => resolve());
+          } else if (stalledSeconds >= 60 && !stallRecovered) {
+            stallRecovered = true;
+            $console.warn(`视频播放进度已 ${Math.round(stalledSeconds)} 秒没有变化，尝试重新播放。`);
+            $debug.warn("cx.media", "播放卡住，尝试恢复", { stalledSeconds, currentTime: media.currentTime });
+            playMedia(() => media.play()).then(() => {
+              media.playbackRate = playbackRate2;
+            });
+          }
+        }, 5e3);
         const playFunction = async () => {
           if (hasFaceRecognition())
             await waitForFaceRecognition();
@@ -18464,19 +20050,17 @@ ${searchContext}` : "",
         };
         media.addEventListener("pause", playFunction);
         media.addEventListener("ended", () => {
-          media.removeEventListener("pause", playFunction);
-          quizLoopStopped = true;
           $console.log("视频播放完毕");
-          clearInterval(reloadInterval);
-          resolve();
+          finish(() => resolve());
         });
         $console.log("视频开始播放");
+        $debug.log("cx.media", "开始播放", { name: videoName, duration: media.duration, playbackRate: playbackRate2 });
         media.volume = volume2;
         media.currentTime = 0;
         setTimeout(() => {
           playMedia(() => media.play()).then(() => {
             media.playbackRate = playbackRate2;
-          }).catch(reject);
+          }).catch((error) => finish(() => reject(error)));
         }, 200);
       });
     },
@@ -18686,7 +20270,15 @@ ${searchContext}` : "",
           }
         }
       });
-      const results = await worker.doWork();
+      attachWorkFloatingBar(worker);
+      const results = await worker.doWork({ enable_debug: isDebugEnabled() });
+      $debug.log("cx.chapter", "章节测验答题完成", {
+        total: results.length,
+        finished: results.filter((result) => {
+          var _a;
+          return ((_a = result.result) == null ? void 0 : _a.finish) === true;
+        }).length
+      });
       reportUnfinishedQuestions(results, "章节测验");
       const autoSaveChapter = async () => {
         if (!frameWindow) {
@@ -18699,7 +20291,7 @@ ${searchContext}` : "",
             var _a, _b;
             const text = ((_a = element.textContent) == null ? void 0 : _a.trim()) || (element instanceof HTMLInputElement ? element.value.trim() : "") || ((_b = element.getAttribute("title")) == null ? void 0 : _b.trim()) || "";
             const onclick = element.getAttribute("onclick") || "";
-            return /保存|暂存|暂时保存/.test(text) || /noSubmit|save/i.test(onclick);
+            return /^(暂时保存|暂存|保存)$/.test(text) || /\bnoSubmit\s*\(/.test(onclick);
           });
           const button = candidates.find((element) => element.offsetParent !== null) || candidates[0];
           if (button) {
@@ -18720,9 +20312,6 @@ ${searchContext}` : "",
         }
         await $.sleep(1500);
         if (clickSaveButton(frameWindow.document)) {
-          saved = true;
-        }
-        if (clickSaveButton(document)) {
           saved = true;
         }
         if (saved) {
@@ -18746,16 +20335,22 @@ ${searchContext}` : "",
         type: uploadType,
         results,
         async callback(finishedRate, uploadable) {
-          var _a, _b;
+          var _a, _b, _c, _d;
           const msg2 = `完成率 ${finishedRate.toFixed(2)}% :  ${uploadable ? "3秒后将自动提交" : "3秒后将自动保存（不提交）"} `;
           $console.info(msg2);
           lib.$message.success({ content: msg2, duration: 3 });
+          if (skipInDryRun(uploadable ? "提交章节测验" : "保存章节测验", "cx.chapter")) {
+            return;
+          }
           await $.sleep(3e3);
           if (uploadable) {
             (_a = frameWindow == null ? void 0 : frameWindow.btnBlueSubmit) == null ? void 0 : _a.call(frameWindow);
             await $.sleep(3e3);
             (_b = frameWindow == null ? void 0 : frameWindow.submitCheckTimes) == null ? void 0 : _b.call(frameWindow);
-            top.$("#workpop").hide();
+            try {
+              (_d = (_c = top == null ? void 0 : top.$) == null ? void 0 : _c.call(top, "#workpop")) == null ? void 0 : _d.hide();
+            } catch {
+            }
             let needRetake = chapterAutoRetakeEnabled && Boolean(frameWindow) && hasUnfinishedResults;
             if (!needRetake && chapterAutoRetakeEnabled && frameWindow) {
               const grade = await waitForChapterGrade(frameWindow);
@@ -19167,6 +20762,9 @@ ${searchContext}` : "",
     return false;
   }
   async function submitCxWorkOrExam(message2) {
+    if (skipInDryRun("提交作业/考试", "cx.work")) {
+      return false;
+    }
     $console.info(message2);
     lib.$message.info({ content: message2, duration: 5 });
     const clicked = clickCxSubmitButton();
@@ -19182,6 +20780,9 @@ ${searchContext}` : "",
     return true;
   }
   async function saveCxWorkOrExam(message2) {
+    if (skipInDryRun("保存作业/考试", "cx.work")) {
+      return false;
+    }
     $console.info(message2);
     lib.$message.info({ content: message2, duration: 5 });
     const clicked = clickCxSaveButton();
@@ -20005,6 +21606,56 @@ ${searchContext}` : "",
       CommonProject.scripts.render.methods.minimize();
     })
   };
+  registerSnapshotCollector("cx", () => {
+    let isTop = false;
+    try {
+      isTop = self === top;
+    } catch {
+      isTop = false;
+    }
+    const attachments = (lib.$gm.unsafeWindow.attachments || []).map((a) => {
+      var _a, _b, _c, _d;
+      return {
+        jobid: (a == null ? void 0 : a.jobid) || ((_a = a == null ? void 0 : a.property) == null ? void 0 : _a._jobid),
+        type: a == null ? void 0 : a.type,
+        name: ((_b = a == null ? void 0 : a.property) == null ? void 0 : _b.name) || ((_c = a == null ? void 0 : a.property) == null ? void 0 : _c.title),
+        mid: (_d = a == null ? void 0 : a.property) == null ? void 0 : _d.mid,
+        job: a == null ? void 0 : a.job,
+        isPassed: a == null ? void 0 : a.isPassed
+      };
+    });
+    const studyCfg = CXProject.scripts.study.cfg;
+    return {
+      isTop,
+      study: {
+        mode: studyCfg.mode,
+        playbackRate: studyCfg.playbackRate,
+        volume: studyCfg.volume,
+        restudy: studyCfg.restudy,
+        forceLearn: studyCfg.forceLearn,
+        enableMedia: studyCfg.enableMedia,
+        enableChapterTest: studyCfg.enableChapterTest,
+        enablePPT: studyCfg.enablePPT,
+        enableHyperlink: studyCfg.enableHyperlink,
+        videoQuizStrategy: studyCfg.videoQuizStrategy
+      },
+      attachments,
+      ...isTop ? {
+        position: readCxPosition(),
+        sectionTabs: Array.from((top == null ? void 0 : top.document.querySelectorAll(".prev_ul li")) || []).map((li) => {
+          var _a;
+          return {
+            className: li.className,
+            text: (_a = li.textContent) == null ? void 0 : _a.trim(),
+            cardid: li.getAttribute("cardid")
+          };
+        }),
+        chapters: CXAnalyses.getChapterInfos().slice(0, 300).map((chapter) => ({ chapterId: chapter.chapterId, unFinishCount: chapter.unFinishCount })),
+        isInFinalTab: CXAnalyses.isInFinalTab(),
+        isInFinalChapter: Boolean(CXAnalyses.isInFinalChapter())
+      } : {}
+    };
+  });
   const state$2 = {
     study: {
       currentMedia: void 0,
@@ -20799,7 +22450,7 @@ ${searchContext}` : "",
     let next2 = getNextBtn();
     (async () => {
       while (next2 && worker.isClose === false) {
-        await worker.doWork({ enable_debug: true });
+        await worker.doWork({ enable_debug: isDebugEnabled() });
         await $.sleep(1e3);
         next2 = getNextBtn();
         if (next2.style.display === "none") {
@@ -20907,7 +22558,7 @@ ${searchContext}` : "",
     let next2 = getNextBtn();
     (async () => {
       while (next2 && worker.isClose === false) {
-        await worker.doWork({ enable_debug: true });
+        await worker.doWork({ enable_debug: isDebugEnabled() });
         await $.sleep(1e3);
         next2 = getNextBtn();
         if (next2.getAttribute("disabled")) {
@@ -21260,12 +22911,25 @@ ${searchContext}` : "",
     if (!vue) {
       return;
     }
+    let stuckCount = 0;
+    let lastCurrent = -1;
+    let turns = 0;
     while (true) {
       const [current, total] = ((_b = (_a = document.querySelector(".preview .page")) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim().replace("上一页", "").replace("下一页", "").split("/").map((i) => parseInt(i.trim()))) || [];
       if (!current || !total) {
         break;
       }
       if (current >= total - 1) {
+        break;
+      }
+      if (current === lastCurrent) {
+        stuckCount++;
+      } else {
+        stuckCount = 0;
+        lastCurrent = current;
+      }
+      if (stuckCount >= 5 || ++turns > Math.max(total * 3, 100)) {
+        $console.warn("PPT 翻页没有生效，已停止自动翻页，请手动检查。");
         break;
       }
       await $.sleep(pptReadPeriod * 1e3);
@@ -21532,7 +23196,7 @@ ${searchContext}` : "",
         CommonProject.scripts.workResults.methods.updateWorkStateByResults(res);
       }
     });
-    worker.doWork({ enable_debug: true }).then(() => {
+    worker.doWork({ enable_debug: isDebugEnabled() }).then(() => {
       lib.$message.info({ content: "作业/考试完成，请自行检查后保存或提交。", duration: 0 });
       worker.emit("done");
     }).catch((err) => {
@@ -22028,7 +23692,7 @@ ${searchContext}` : "",
         CommonProject.scripts.workResults.methods.updateWorkStateByResults(res);
       }
     });
-    worker.doWork({ enable_debug: true }).then(async (results) => {
+    worker.doWork({ enable_debug: isDebugEnabled() }).then(async (results) => {
       if (worker.isClose) {
         return;
       }

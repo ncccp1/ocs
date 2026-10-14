@@ -170,6 +170,7 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 		};
 
 		const waitForRequested = async (result: WorkResult<E>) => {
+			const waitSeconds = AnswerWrapperHandlerConfig.timeout_seconds;
 			return new Promise<void>((resolve, reject) => {
 				const interval = setInterval(() => {
 					if (result?.requested === true) {
@@ -182,7 +183,7 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 				const timeout = setTimeout(() => {
 					clearInterval(interval);
 					reject(new Error('答题超时！'));
-				}, (AnswerWrapperHandlerConfig.timeout_seconds + 10) * 1000);
+				}, (waitSeconds + 10 + (AnswerWrapperHandlerConfig.extra_wait_seconds || 0)) * 1000);
 			});
 		};
 
@@ -393,7 +394,7 @@ export class CustomOCSWorker extends CommonEventEmitter<WorkerEvents> {
 
 		if (options?.enable_debug) {
 			console.debug('开始答题', this);
-			console.debug('题目数量: ', this.opts.questions.length);
+			console.debug('题目数量: ', questions.length);
 		}
 		const results: SimplifyWorkResult[] = [];
 
@@ -444,7 +445,8 @@ export class CustomOCSWorker extends CommonEventEmitter<WorkerEvents> {
 			} catch (err) {
 				results[index].requested = true;
 				results[index].resolved = false;
-				results[index].finish = true;
+				// 搜题过程出错时这道题并没有完成，不能计入完成率
+				results[index].finish = false;
 				results[index].error = err instanceof Error ? err.message : String(err);
 				this.opts.onResultsUpdate?.(results[index], index, results);
 			}

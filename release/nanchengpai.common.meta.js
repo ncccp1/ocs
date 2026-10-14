@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name       				南城派网课助手 - 全域名通用版
-// @version    				4.12.45
+// @version    				4.12.46
 // @description				南城派网课助手，基于 OCSJS 二次开发，支持  【超星学习通】 【知到智慧树】 【职教云】 【智慧职教】 【中国大学MOOC】 等网课的学习、作业、考试。
 // @author     				ncccp1
 // @license    				MIT

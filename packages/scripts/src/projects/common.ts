@@ -34,8 +34,11 @@ import {
 	getResolvedMetoAuthConfig,
 	isAiAnswererAvailable,
 	isCredibleAnswer,
-	searchQuestionsInWrappers
+	searchQuestionsInWrappers,
+	syncAiWaitConfig,
+	DEFAULT_AI_MAX_WAIT_SECONDS
 } from '../utils/answerer';
+import { $debug } from '../utils/debug';
 
 const TAB_WORK_RESULTS_KEY = 'common.work-results.results';
 const PROJECT_NAME = '南城派网课助手';
@@ -462,6 +465,366 @@ function createManualSearchEntry() {
 	]);
 }
 
+/* ----------------------------- 设置导出 / 导入 ----------------------------- */
+
+/** 导出文件中记录来源信息的键，导入时不会写入存储 */
+const SETTINGS_EXPORT_META_KEY = '__ncp_export__';
+/** 题库缓存在脚本存储中的键（apps 脚本的命名空间 + 配置名） */
+const QUESTION_CACHE_STORE_KEY = 'common.apps.localQuestionCaches';
+
+/** 不属于“设置”的存储项：运行状态、日志、临时数据和更新检查状态，导出和导入时一律排除 */
+function isTransientStoreKey(key: string) {
+	return (
+		key === SETTINGS_EXPORT_META_KEY ||
+		key.startsWith('_tab_change_') ||
+		key.startsWith('ncp.snapshot.') ||
+		// 请求记录（包含请求头，可能带有密钥）
+		key === 'list' ||
+		/\.(logs|searchLogs)$/.test(key) ||
+		/^background\.update\.(lastCheck|notToday|notifiedVersion)$/.test(key)
+	);
+}
+
+/** 包含密钥/凭证的存储项：AI Key、MeTo 认证、通知地址、题库配置（题库地址里常带 token） */
+const SECRET_STORE_KEYS = new Set(
+	[
+		...['aiApiKey', 'metoTkUid', 'metoPoolId', 'metoPp', 'metoUserId'],
+		...['notificationWebhooks', 'answererWrappers']
+	].map((name) => 'common.settings.' + name)
+);
+
+function isSecretStoreKey(key: string) {
+	return SECRET_STORE_KEYS.has(key);
+}
+
+function downloadTextFile(filename: string, content: string) {
+	const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = filename;
+	a.style.display = 'none';
+	document.body.appendChild(a);
+	a.click();
+	setTimeout(() => {
+		a.remove();
+		URL.revokeObjectURL(url);
+	}, 2000);
+}
+
+function getStoredCacheCount() {
+	const caches = $store.get(QUESTION_CACHE_STORE_KEY, []) as unknown;
+	return Array.isArray(caches) ? caches.length : 0;
+}
+
+/** 导出设置：可选择是否包含题库缓存、是否包含密钥 */
+function openExportSettingsDialog() {
+	const cacheCount = getStoredCacheCount();
+	const allKeys = $store.list().filter((key) => !isTransientStoreKey(key));
+	const secretCount = allKeys.filter((key) => isSecretStoreKey(key) && $store.get(key)).length;
+
+	const cachesBox = h('input', { type: 'checkbox', checked: cacheCount > 0, disabled: cacheCount === 0 });
+	const secretsBox = h('input', { type: 'checkbox', checked: true, disabled: secretCount === 0 });
+	const warning = h(
+		'div',
+		{ style: { color: '#d9534f', fontSize: '12px', margin: '4px 0 0 24px', display: 'none' } },
+		'⚠️ 文件中会包含明文的密钥，请只自己保存，不要发给别人。'
+	);
+	const syncWarning = () => {
+		warning.style.display = secretsBox.checked && secretCount > 0 ? 'block' : 'none';
+	};
+	secretsBox.onchange = syncWarning;
+	syncWarning();
+
+	const row = (box: HTMLElement, title: string, desc: string) =>
+		h(
+			'label',
+			{ style: { display: 'flex', alignItems: 'flex-start', gap: '8px', margin: '10px 0', cursor: 'pointer' } },
+			[box, h('span', [h('b', title), h('div', { style: { fontSize: '12px', opacity: '0.75' } }, desc)])]
+		);
+
+	$modal.confirm({
+		width: 520,
+		title: '📤 导出设置',
+		content: h('div', { style: { lineHeight: '1.6' } }, [
+			h(
+				'div',
+				'把全局设置、题库配置、各平台学习设置保存为一个文件，换电脑、换浏览器、重装脚本或升级到新版本后，在新版本里“导入设置”即可恢复。'
+			),
+			row(cachesBox, `包含题库缓存（${cacheCount} 条）`, '缓存很大时文件也会很大；也可以之后在“题库缓存”里单独导出。'),
+			row(
+				secretsBox,
+				`包含密钥和凭证（${secretCount} 项）`,
+				'AI API Key、MeTo 认证信息、通知地址、题库配置。不勾选则导出的文件可以安全分享，导入后需要重新填写这些内容。'
+			),
+			warning
+		]),
+		confirmButtonText: '导出',
+		cancelButtonText: '取消',
+		onConfirm: () => {
+			const includeCaches = (cachesBox as HTMLInputElement).checked;
+			const includeSecrets = (secretsBox as HTMLInputElement).checked;
+			const data: Record<string, unknown> = {};
+
+			for (const key of allKeys) {
+				if (!includeCaches && key === QUESTION_CACHE_STORE_KEY) {
+					continue;
+				}
+				if (!includeSecrets && isSecretStoreKey(key)) {
+					continue;
+				}
+				const value = $store.get(key);
+				// false、0、空字符串都是有意义的设置值（例如把默认开启的功能关掉），必须保留，只排除不存在的值
+				if (value === undefined || value === null) {
+					continue;
+				}
+				data[key] = value;
+			}
+
+			const infos = $gm.getInfos();
+			data[SETTINGS_EXPORT_META_KEY] = {
+				app: PROJECT_NAME,
+				version: infos?.script?.version || '',
+				exportedAt: new Date().toISOString(),
+				includeCaches,
+				includeSecrets,
+				count: Object.keys(data).length
+			};
+
+			const date = new Date().toISOString().slice(0, 10);
+			const filename = `nanchengpai-setting-${date}${includeSecrets ? '' : '-no-secrets'}${PROJECT_SETTING_EXTENSION}`;
+			downloadTextFile(filename, JSON.stringify(data, null, 2));
+			$message.success({ content: `已导出 ${Object.keys(data).length - 1} 项设置：${filename}`, duration: 6 });
+		}
+	});
+}
+
+/** 导入设置：先解析并显示内容概要，确认后再写入 */
+function openImportSettingsDialog() {
+	const input = h('input', { type: 'file', accept: PROJECT_SETTING_IMPORT_ACCEPT });
+	input.onchange = async () => {
+		const file = input.files?.[0];
+		if (!file) {
+			return;
+		}
+
+		let parsed: Record<string, unknown>;
+		try {
+			const value = JSON.parse(await file.text());
+			if (!value || typeof value !== 'object' || Array.isArray(value)) {
+				throw new Error('文件内容不是设置对象');
+			}
+			parsed = value as Record<string, unknown>;
+		} catch (error) {
+			$modal.alert({
+				content: h('div', [
+					h('div', '无法读取这个设置文件，请确认它是通过“导出全部设置”生成的（.ncpsetting 或旧版 .ocssetting）。'),
+					h(
+						'div',
+						{ style: { marginTop: '6px', opacity: '0.75' } },
+						'原因：' + String((error as Error).message || error)
+					)
+				])
+			});
+			return;
+		}
+
+		const meta = (parsed[SETTINGS_EXPORT_META_KEY] || {}) as { version?: string; exportedAt?: string };
+		const keys = Object.keys(parsed).filter((key) => !isTransientStoreKey(key));
+		const cacheItems = normalizeQuestionCacheItems(parsed[QUESTION_CACHE_STORE_KEY]);
+		const settingKeys = keys.filter((key) => key !== QUESTION_CACHE_STORE_KEY);
+		const secretKeys = settingKeys.filter((key) => isSecretStoreKey(key) && parsed[key]);
+
+		if (settingKeys.length === 0 && cacheItems.length === 0) {
+			$modal.alert({ content: '这个文件里没有可以导入的设置。' });
+			return;
+		}
+
+		const mergeRadio = h('input', { type: 'radio', name: 'ncp-cache-mode', value: 'merge', checked: true });
+		const replaceRadio = h('input', { type: 'radio', name: 'ncp-cache-mode', value: 'replace' });
+		const radioRow = (radio: HTMLElement, text: string) =>
+			h('label', { style: { display: 'block', margin: '4px 0', cursor: 'pointer' } }, [radio, ' ' + text]);
+
+		const exportedAt = meta.exportedAt ? new Date(meta.exportedAt).toLocaleString() : '未知';
+		$modal.confirm({
+			width: 520,
+			title: '📥 导入设置',
+			content: h('div', { style: { lineHeight: '1.7' } }, [
+				h('div', [
+					'文件：',
+					h('b', file.name),
+					h(
+						'div',
+						{ style: { fontSize: '12px', opacity: '0.75' } },
+						`来自版本 ${meta.version || '未知'}，导出时间 ${exportedAt}`
+					)
+				]),
+				h('ul', { style: { margin: '8px 0', paddingLeft: '20px' } }, [
+					h('li', `设置项 ${settingKeys.length} 项（会覆盖当前同名设置，其他设置保持不变）`),
+					h(
+						'li',
+						secretKeys.length
+							? `其中包含 ${secretKeys.length} 项密钥/凭证（AI Key、MeTo 认证、题库配置等）`
+							: '不包含密钥/凭证'
+					),
+					h('li', cacheItems.length ? `题库缓存 ${cacheItems.length} 条` : '不包含题库缓存')
+				]),
+				...(cacheItems.length
+					? [
+							h('div', { style: { marginTop: '8px' } }, [
+								h('b', '题库缓存的处理方式：'),
+								radioRow(mergeRadio, `合并（推荐）：保留当前缓存，追加文件中的 ${cacheItems.length} 条`),
+								radioRow(replaceRadio, '覆盖：丢弃当前缓存，只保留文件中的缓存')
+							])
+					  ]
+					: []),
+				h('div', { style: { marginTop: '8px', fontSize: '12px', opacity: '0.75' } }, '导入完成后页面会自动刷新。')
+			]),
+			confirmButtonText: '导入并刷新',
+			cancelButtonText: '取消',
+			onConfirm: async () => {
+				let applied = 0;
+				for (const key of settingKeys) {
+					$store.set(key, parsed[key]);
+					applied++;
+				}
+
+				if (cacheItems.length) {
+					if ((replaceRadio as HTMLInputElement).checked) {
+						$store.set(QUESTION_CACHE_STORE_KEY, []);
+						invalidateQuestionCacheIndex();
+					}
+					// 通过统一入口写入：按可信度合并、去重，标准答案会覆盖旧答案
+					await CommonProject.scripts.apps.methods.addQuestionCache(...cacheItems);
+				}
+
+				invalidateQuestionCacheIndex();
+				$message.success({
+					content: `已导入 ${applied} 项设置${
+						cacheItems.length ? `和 ${cacheItems.length} 条题库缓存` : ''
+					}，页面即将刷新。`,
+					duration: 3
+				});
+				setTimeout(() => location.reload(), 2000);
+			}
+		});
+	};
+	input.click();
+}
+
+/**
+ * 题库缓存的内存索引（规范化题干 -> 缓存列表）。
+ *
+ * 缓存长期保存、不限制条数，而脚本管理器的存储每次读取都要反序列化整个数组，
+ * 缓存很大时“每答一道题读一次再逐条规范化比较”会越来越慢。
+ * 这里只在缓存发生变化后重建一次索引，之后每次搜题都是 O(1) 查找。
+ * 写入始终读取最新的存储内容再修改，不依赖索引，避免多个标签页之间互相覆盖。
+ */
+let questionCacheIndex: Map<string, QuestionCache[]> | undefined;
+let questionCacheIndexListening = false;
+
+function invalidateQuestionCacheIndex() {
+	questionCacheIndex = undefined;
+}
+
+function getQuestionCacheIndex(read: () => QuestionCache[]) {
+	if (!questionCacheIndex) {
+		const index = new Map<string, QuestionCache[]>();
+		for (const cache of read() || []) {
+			const key = normalizeCacheTitle(cache.title);
+			const list = index.get(key);
+			if (list) {
+				list.push(cache);
+			} else {
+				index.set(key, [cache]);
+			}
+		}
+		questionCacheIndex = index;
+	}
+	return questionCacheIndex;
+}
+
+/** MeTo 认证信息获取教程 */
+function showMetoGuide() {
+	$modal.simple({
+		width: 640,
+		content: h('div', { style: { lineHeight: '1.7', fontSize: '13px' } }, [
+			h('h3', { style: { margin: '0 0 8px' } }, 'MeTo 认证信息获取教程'),
+			$ui.notes([
+				'出于安全考虑，南城派不再内置任何默认的 MeTo 账号，需要填写你自己的认证信息。',
+				'MeTo 官方文档站（doc.metst.cn）目前没有公开说明如何获取这些值，下面的方法是根据 MeTo 的请求格式整理的，请按实际页面情况操作。'
+			]),
+			h('ol', { style: { paddingLeft: '20px' } }, [
+				h('li', [
+					'安装并登录 MeTo 官方脚本（官网 ',
+					h('a', { href: 'https://doc.metst.cn', target: '_blank' }, 'doc.metst.cn'),
+					'）。登录使用邮箱，登录邮件里的链接需要在“已安装脚本的浏览器”中打开。'
+				]),
+				h('li', '打开任意网课答题页面，让 MeTo 官方脚本执行一次搜题。'),
+				h('li', '按 F12 打开开发者工具，切换到“网络（Network）”，在筛选框输入 queryProblems。'),
+				h('li', '点击这条请求，在“载荷（Payload）/请求负载”里可以看到 JSON，其中：'),
+				h('ul', { style: { paddingLeft: '20px' } }, [
+					h('li', [h('b', 'userId'), ' 的值 → 填入本页的 ', h('b', 'tk_uid')]),
+					h('li', [h('b', 'poolId'), ' 的值 → 填入本页的 ', h('b', 'poolId')])
+				]),
+				h('li', '回到 通用 → 全局设置，填入后即可使用（无需刷新页面，下一次搜题生效）。')
+			]),
+			$ui.notes([
+				'pp 和 user_id 是可选项：只有拿不到 poolId 时才需要，poolId = md5(md5(user_id) + pp)，可以点击“重算 MeTo poolId”自动计算。',
+				'这些值等同于你的账号凭证，请不要分享给别人，也不要把包含它们的“导出全部设置”文件发给别人。'
+			])
+		])
+	});
+}
+
+/**
+ * 保存自定义题库配置前的确认：
+ * 题库配置里的 handler 是会在浏览器中执行的代码，恶意配置可以读取脚本存储（包括 AI API Key）。
+ */
+function confirmCustomHandlers(wrappers: AnswererWrapper[]) {
+	return new Promise<boolean>((resolve) => {
+		let settled = false;
+		const settle = (value: boolean) => {
+			if (!settled) {
+				settled = true;
+				resolve(value);
+			}
+		};
+		const hostOf = (url: string) => {
+			try {
+				return new URL(url).hostname;
+			} catch {
+				return url || '未知地址';
+			}
+		};
+
+		$modal.confirm({
+			width: 600,
+			title: '⚠️ 请确认题库配置来源',
+			content: h('div', { style: { lineHeight: '1.7' } }, [
+				h(
+					'div',
+					'题库配置里的 handler 是一段会在你的浏览器中执行的代码（用来解析题库返回的内容）。恶意的配置可以借此读取脚本保存的数据，包括 AI API Key。'
+				),
+				h('div', { style: { margin: '8px 0' } }, '请只使用来自可信来源的配置。本次将保存以下题库：'),
+				h(
+					'ul',
+					{ style: { paddingLeft: '20px' } },
+					wrappers.map((wrapper) => h('li', `${wrapper.name || '未命名题库'}（${hostOf(wrapper.url)}）`))
+				)
+			]),
+			confirmButtonText: '我已确认来源可信，保存',
+			cancelButtonText: '取消',
+			onConfirm: () => settle(true),
+			onCancel: () => settle(false),
+			// onClose 在确认和取消之后都会触发，延迟一下，保证先处理确认结果
+			onClose: () => {
+				setTimeout(() => settle(false), 50);
+			}
+		});
+	});
+}
+
 export const CommonProject = Project.create({
 	name: '通用',
 	domains: [],
@@ -659,12 +1022,16 @@ export const CommonProject = Project.create({
 															select.value = '默认';
 															const metoConfig = getResolvedMetoAuthConfig();
 															if (!metoConfig.tkUid) {
-																$modal.alert({ content: 'MeTo 认证缺少 tk_uid，请先在全局设置中填写。' });
+																$modal.alert({
+																	content:
+																		'MeTo 认证缺少 tk_uid，请先在 通用 -> 全局设置 中填写，点击“MeTo 认证获取教程”查看获取方法。'
+																});
 																return;
 															}
 															if (!metoConfig.poolId) {
 																$modal.alert({
-																	content: 'MeTo 认证缺少 poolId，请填写 poolId，或者填写 user_id + pp 后重新计算。'
+																	content:
+																		'MeTo 认证缺少 poolId，请填写 poolId，或者填写 user_id + pp 后重新计算。点击“MeTo 认证获取教程”查看获取方法。'
 																});
 																return;
 															}
@@ -712,6 +1079,11 @@ export const CommonProject = Project.create({
 																.filter(Boolean);
 															for (const content of contents) {
 																awsResult.push(...(await AnswerWrapperParser.from(content)));
+															}
+
+															// 自定义题库配置包含会被执行的 handler 代码，保存前需要用户确认来源
+															if (awsResult.length && (await confirmCustomHandlers(awsResult)) === false) {
+																return;
 															}
 														}
 
@@ -834,21 +1206,21 @@ export const CommonProject = Project.create({
 				},
 				metoTkUid: {
 					label: 'MeTo tk_uid (ti_uid)',
-					defaultValue: '397265',
+					defaultValue: '',
 					attrs: {
 						title: 'MeTo 题库认证中的 tk_uid / ti_uid。'
 					}
 				},
 				metoPoolId: {
 					label: 'MeTo poolId',
-					defaultValue: '2efc793b-661c-1760-d1ad-e51614113424',
+					defaultValue: '',
 					attrs: {
 						title: 'MeTo 题库认证中的 poolId。留空时可通过 user_id + pp 自动计算。'
 					}
 				},
 				metoPp: {
 					label: 'MeTo pp (密钥种子)',
-					defaultValue: '9ffb0a9f',
+					defaultValue: '',
 					attrs: {
 						title: 'MeTo 题库认证中的 pp，用于重新计算 poolId。'
 					}
@@ -880,6 +1252,17 @@ export const CommonProject = Project.create({
 							);
 							$message.success({ content: 'MeTo poolId 已重新计算。' });
 						};
+					}
+				},
+				metoGuide: {
+					label: 'MeTo 认证获取教程',
+					defaultValue: '查看教程',
+					attrs: {
+						type: 'button',
+						title: '南城派不再内置 MeTo 账号，点击查看如何获取自己的 tk_uid 和 poolId。'
+					},
+					onload() {
+						this.onclick = () => showMetoGuide();
 					}
 				},
 				aiEnable: {
@@ -945,6 +1328,19 @@ export const CommonProject = Project.create({
 						type: 'checkbox',
 						title:
 							'AI 没有把握（信心不足或给不出答案）时，自动联网搜索后再作答。优先使用 DeepSeek 原生联网搜索（服务端多轮搜索，较慢且更耗额度），不可用时回退为抓取 Bing / DuckDuckGo 网页结果。'
+					}
+				},
+				aiMaxWait: {
+					label: 'AI 单题最长等待（秒）',
+					defaultValue: DEFAULT_AI_MAX_WAIT_SECONDS,
+					showIf: 'common.settings.aiEnable',
+					attrs: {
+						type: 'number',
+						min: 60,
+						max: 1800,
+						step: 30,
+						title:
+							'AI 思考、联网搜索、重试的总时限，超过后放弃这道题。深度思考的复杂题可能需要几分钟，默认 600 秒。AI 使用流式传输，只要仍在输出内容就不会被误判为卡死。'
 					}
 				},
 				aiExtraBody: {
@@ -1030,6 +1426,16 @@ export const CommonProject = Project.create({
 						type: 'checkbox',
 						title:
 							'超星章节测试/作业页未全部完成时，自动随机补答未完成题目并强制提交；提交后尝试查看正确答案、写入本地题库缓存，再点击重做并用缓存答案重新答题。'
+					}
+				},
+				'chapterTest-autoRetake-exam': {
+					defaultValue: false,
+					label: '(仅超星)考试也允许错题回填重答',
+					showIf: 'common.settings.chapterTest-autoRetake',
+					attrs: {
+						type: 'checkbox',
+						title:
+							'默认只对作业/章节测验生效。开启后，考试页面在有题没搜到答案时也会用随机答案提交以查看正确答案并重做。考试通常只能提交一次，随机答案提交后没有重新作答的机会，请谨慎开启；每次开始前还会再次确认。'
 					}
 				},
 				advancedSettings: {
@@ -1278,6 +1684,11 @@ export const CommonProject = Project.create({
 				this.onConfigChange('answerWrapperHandlerTimeout', (sec) => {
 					AnswerWrapperHandlerConfig.timeout_seconds = sec;
 				});
+
+				// AI 答题可能思考很久，答题线程需要等待更长时间，否则答案还没返回就会被判定为搜题超时
+				syncAiWaitConfig();
+				this.onConfigChange('aiEnable', () => syncAiWaitConfig());
+				this.onConfigChange('aiMaxWait', () => syncAiWaitConfig());
 
 				// 定时关闭检查
 				const checkShutdown = () => {
@@ -1979,6 +2390,7 @@ export const CommonProject = Project.create({
 						}
 
 						this.cfg.localQuestionCaches = questionCaches;
+						invalidateQuestionCacheIndex();
 					},
 					addQuestionCacheFromWorkResult(swr: SimplifyWorkResult[]) {
 						const scope = getQuestionCacheScope();
@@ -2038,13 +2450,17 @@ export const CommonProject = Project.create({
 						const titleKey = normalizeCacheTitle(title);
 						const allowCrossCourse = Boolean(CommonProject.scripts.settings.cfg.cacheCrossCourse);
 
-						let caches = (this.cfg.localQuestionCaches as QuestionCache[])
-							// 题干相同，并且不属于其他课程（未识别课程的旧缓存对所有课程通用）
-							.filter(
-								(cache) =>
-									normalizeCacheTitle(cache.title) === titleKey &&
-									(allowCrossCourse || !scope || !cache.scope || cache.scope === scope)
-							);
+						if (!questionCacheIndexListening) {
+							questionCacheIndexListening = true;
+							// 其他标签页/页面修改了缓存时，丢弃索引
+							this.onConfigChange('localQuestionCaches', () => invalidateQuestionCacheIndex());
+						}
+
+						let caches =
+							(questionCacheIndex || getQuestionCacheIndex(() => this.cfg.localQuestionCaches as QuestionCache[]))
+								.get(titleKey)
+								// 不属于其他课程（未识别课程的旧缓存对所有课程通用）
+								?.filter((cache) => allowCrossCourse || !scope || !cache.scope || cache.scope === scope) || [];
 
 						// 填空题答案里只有“第一空：”这样的标签（没有内容）的缓存是无效数据：清除；
 						// 带有标签的有效答案去掉标签，避免把“第一空：”填进输入框
@@ -2055,6 +2471,7 @@ export const CommonProject = Project.create({
 							this.cfg.localQuestionCaches = (this.cfg.localQuestionCaches as QuestionCache[]).filter(
 								(c) => !isJunk(c)
 							);
+							invalidateQuestionCacheIndex();
 							caches = caches.filter((c) => !isBlankAnswerJunk(c.answer));
 						}
 						caches = caches.map((c) =>
@@ -2087,9 +2504,18 @@ export const CommonProject = Project.create({
 								this.cfg.localQuestionCaches = (this.cfg.localQuestionCaches as QuestionCache[]).filter(
 									(c) => !isStale(c)
 								);
+								invalidateQuestionCacheIndex();
 							}
 							caches = [];
 						}
+
+						$debug.log('cache', caches.length ? '命中题库缓存' : '题库缓存未命中，改为在线搜题', {
+							title: title.slice(0, 40),
+							hits: caches.length,
+							sources: caches.map((c) => getQuestionCacheSource(c)),
+							scope,
+							crossCourse: allowCrossCourse
+						});
 
 						for (const cache of caches) {
 							const source = getQuestionCacheSource(cache);
@@ -2323,6 +2749,7 @@ export const CommonProject = Project.create({
 												this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
 													(cache: QuestionCache) => !same(cache)
 												);
+												invalidateQuestionCacheIndex();
 												await removeFromRetakeTab(same);
 												render();
 											};
@@ -2421,6 +2848,7 @@ export const CommonProject = Project.create({
 													this.cfg.localQuestionCaches = this.cfg.localQuestionCaches.filter(
 														(cache: QuestionCache) => getQuestionCacheSource(cache) !== 'ai'
 													);
+													invalidateQuestionCacheIndex();
 													await removeFromRetakeTab((cache) => getQuestionCacheSource(cache) === 'ai');
 													render();
 													$message.success({ content: '已清除全部 AI 答案缓存。', duration: 5 });
@@ -2432,6 +2860,7 @@ export const CommonProject = Project.create({
 														content: '确定要清空全部题库缓存吗？此操作无法撤销，建议先导出备份。',
 														onConfirm: async () => {
 															this.cfg.localQuestionCaches = [];
+															invalidateQuestionCacheIndex();
 															try {
 																await $store.setTab(CX_CHAPTER_RETAKE_CACHE_TAB_KEY, []);
 															} catch {}
@@ -2458,25 +2887,11 @@ export const CommonProject = Project.create({
 						{
 							innerText: '📤 导出全部设置',
 							style: btnStyle,
-							title: `导出全部页面的设置，包括全局设置，题库配置，学习设置等等。（文件后缀名为：${PROJECT_SETTING_EXTENSION}）`
+							title: `导出设置，包括全局设置、题库配置、各平台学习设置等，可选择是否包含题库缓存和密钥。换电脑或重装脚本后可导入恢复。（文件后缀名为：${PROJECT_SETTING_EXTENSION}）`
 						},
 						(btn) => {
 							btn.onclick = () => {
-								const setting = Object.create({});
-								for (const key of $store.list()) {
-									const val = $store.get(key);
-									if (val) {
-										Reflect.set(setting, key, val);
-									}
-								}
-								const blob = new Blob([JSON.stringify(setting, null, 2)], { type: 'text/plain' });
-								const url = URL.createObjectURL(blob);
-								const a = h('a', {
-									href: url,
-									download: `nanchengpai-setting-export${PROJECT_SETTING_EXTENSION}`
-								});
-								a.click();
-								URL.revokeObjectURL(url);
+								openExportSettingsDialog();
 							};
 						}
 					)
@@ -2488,26 +2903,11 @@ export const CommonProject = Project.create({
 						{
 							innerText: '📥 导入全部设置',
 							style: btnStyle,
-							title: `导入并且覆盖当前的全部设置。（文件后缀名优先为：${PROJECT_SETTING_EXTENSION}，同时兼容旧版 .ocssetting）`
+							title: `导入设置文件，导入前会显示内容概要并让你确认。（文件后缀名优先为：${PROJECT_SETTING_EXTENSION}，同时兼容旧版 .ocssetting）`
 						},
 						(btn) => {
 							btn.onclick = () => {
-								const input = h('input', { type: 'file', accept: PROJECT_SETTING_IMPORT_ACCEPT });
-								input.onchange = async () => {
-									const file = input.files?.[0];
-									if (file) {
-										const setting = await file.text();
-										const obj = JSON.parse(setting);
-										for (const key of Object.keys(obj)) {
-											$store.set(key, obj[key]);
-										}
-										$message.success({ content: '设置导入成功，页面即将刷新。', duration: 3 });
-										setTimeout(() => {
-											location.reload();
-										}, 3000);
-									}
-								};
-								input.click();
+								openImportSettingsDialog();
 							};
 						}
 					)
@@ -2525,7 +2925,18 @@ export const CommonProject = Project.create({
 				const sep = (text: string) => h('div', { className: 'separator', style: { padding: '4px 0px' } }, text);
 
 				panel.body.replaceChildren(
-					h('div', [sep('题库拓展'), cachesBtn, sep('其他功能'), exportSetting, importSetting])
+					h('div', [
+						sep('题库拓展'),
+						cachesBtn,
+						sep('设置备份与迁移'),
+						exportSetting,
+						importSetting,
+						h(
+							'div',
+							{ style: { fontSize: '12px', opacity: '0.75', padding: '4px 8px', lineHeight: '1.6' } },
+							'换电脑、换浏览器、重装脚本或升级前先“导出设置”，在新版本里“导入设置”即可恢复；脚本自动更新不会丢失设置。'
+						)
+					])
 				);
 			}
 		})

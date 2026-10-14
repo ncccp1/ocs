@@ -19,11 +19,14 @@ import { cleanBlankAnswer, isBlankAnswerJunk, matchAnswerToOptions } from '../ut
 import { workNotes, volume, playbackRate, dropdownStyle } from '../utils/configs';
 import {
 	answerWrapperEmptyWarning,
+	attachWorkFloatingBar,
 	commonWork,
 	optimizationElementWithImage,
 	removeRedundantWords,
 	simplifyWorkResult
 } from '../utils/work';
+import { $debug, isDebugEnabled, skipInDryRun } from '../utils/debug';
+import { registerSnapshotCollector } from '../utils/snapshot';
 import md5 from 'md5';
 // @ts-ignore
 import Typr from 'typr.js';
@@ -729,12 +732,66 @@ export const CXProject = Project.create({
 	}
 });
 
+/**
+ * 考试页面启用“错题回填重答”前的二次确认。
+ * 考试通常只能提交一次，随机答案提交后没有重做机会，所以每次开始前都要明确同意。
+ */
+function confirmExamRetake() {
+	return new Promise<boolean>((resolve) => {
+		let settled = false;
+		const settle = (value: boolean) => {
+			if (!settled) {
+				settled = true;
+				resolve(value);
+			}
+		};
+
+		$modal.confirm({
+			width: 560,
+			title: '⚠️ 考试页面启用错题回填重答',
+			maskCloseable: false,
+			content: h('div', { style: { lineHeight: '1.7' } }, [
+				h('div', '当前是考试页面，并且你开启了“考试也允许错题回填重答”。'),
+				h(
+					'div',
+					{ style: { margin: '8px 0' } },
+					'如果有题目没有搜到答案，脚本会先用随机答案补满并提交考试，再查看正确答案、重做一次。'
+				),
+				h('div', [h('b', '考试通常只能提交一次'), '，提交后可能没有重做机会，成绩将以这次提交为准。']),
+				h('div', { style: { marginTop: '8px' } }, '选择“不允许”将只正常答题，不会用随机答案提交。')
+			]),
+			confirmButtonText: '允许，随机答案提交',
+			cancelButtonText: '不允许（仅答题）',
+			onConfirm: () => settle(true),
+			onCancel: () => settle(false),
+			onClose: () => {
+				setTimeout(() => settle(false), 50);
+			}
+		});
+	});
+}
+
 function workOrExam(type: 'work' | 'exam' = 'work', options: WorkOrExamOptions) {
 	const { answererWrappers, period, thread, redundanceWordsText, answerSeparators, answerMatchMode, preview_mode } =
 		options;
 	const cxAutoRetakeDepth = options.cxAutoRetakeDepth || 0;
-	const cxAutoRetakeEnabled =
+	let cxAutoRetakeEnabled =
 		Boolean(CommonProject.scripts.settings.cfg['chapterTest-autoRetake']) && cxAutoRetakeDepth === 0;
+	// 考试只能提交一次：错题回填重答必须单独开启，并且每次开始前都要再确认一次
+	let examRetakeGate: Promise<void> = Promise.resolve();
+	if (cxAutoRetakeEnabled && type === 'exam') {
+		if (!CommonProject.scripts.settings.cfg['chapterTest-autoRetake-exam']) {
+			cxAutoRetakeEnabled = false;
+			$console.info('当前是考试页面：“错题回填重答”默认不对考试生效，如需使用请在 通用-全局设置 中单独开启。');
+		} else {
+			examRetakeGate = confirmExamRetake().then((allowed) => {
+				if (!allowed) {
+					cxAutoRetakeEnabled = false;
+					$console.info('已选择不允许考试使用随机答案提交，本次只正常答题。');
+				}
+			});
+		}
+	}
 
 	$message.info(`开始${type === 'work' ? '作业' : '考试'}`);
 	const restoreCachesTask = restoreChapterRetakeCaches();
@@ -924,7 +981,8 @@ function workOrExam(type: 'work' | 'exam' = 'work', options: WorkOrExamOptions) 
 		Promise.resolve()
 			.then(async () => {
 				await restoreCachesTask;
-				return worker.doWork();
+				await examRetakeGate;
+				return worker.doWork({ enable_debug: isDebugEnabled() });
 			})
 			.then(async (results) => {
 				reportUnfinishedQuestions(results, '作业/考试');
@@ -966,8 +1024,28 @@ function workOrExam(type: 'work' | 'exam' = 'work', options: WorkOrExamOptions) 
 
 		(async () => {
 			await restoreCachesTask;
-			while (next && worker.isClose === false) {
-				await worker.doWork({ enable_debug: true });
+			let lastQuestionKey = '';
+			let loops = 0;
+			while (next && worker.isClose === false && loops++ < 500) {
+				// 点击“下一题”后题目没有变化，说明按钮没有生效，继续循环只会反复答同一道题
+				const questionKey = (document.querySelector('.questionLi')?.textContent || '')
+					.replace(/\s+/g, '')
+					.slice(0, 200);
+				if (questionKey && questionKey === lastQuestionKey) {
+					const msg = '点击“下一题”后题目没有变化，已停止自动答题，请手动检查。';
+					$console.warn(msg);
+					$message.warn({ content: msg, duration: 0 });
+					$debug.warn('cx.work', '下一题按钮没有生效，停止循环', { loops });
+					break;
+				}
+				lastQuestionKey = questionKey;
+
+				try {
+					await worker.doWork({ enable_debug: isDebugEnabled() });
+				} catch (error) {
+					$console.warn('答题过程出错：' + String(error));
+					break;
+				}
 				await $.sleep(1000);
 				next = getNextBtn();
 				next?.click();
@@ -1342,6 +1420,11 @@ export async function study(
 	};
 
 	await runJobs();
+	$debug.log('cx.study', '任务点处理结束', {
+		searched: searchedJobs.length,
+		attachmentTotal,
+		mode: opts.mode
+	});
 
 	// @ts-ignore
 	top._preChapterId = '';
@@ -1353,6 +1436,13 @@ export async function study(
 		// （页面刷新或直接进入某个小节后它可能与实际不一致，会直接跳到下一章，漏掉后面的小节）。
 		const sectionTabs = Array.from(top?.document.querySelectorAll<HTMLElement>('.prev_ul li') || []);
 		const activeTabIndex = sectionTabs.findIndex((tab) => tab.classList.contains('active'));
+		$debug.log('cx.next', '准备跳转', {
+			mode: CXProject.scripts.study.cfg.mode,
+			tabs: sectionTabs.map((tab) => tab.className.trim() || '-'),
+			activeTabIndex,
+			isInFinalTab: CXAnalyses.isInFinalTab(),
+			isInFinalChapter: Boolean(CXAnalyses.isInFinalChapter())
+		});
 		if (sectionTabs.length > 1 && activeTabIndex !== -1 && activeTabIndex < sectionTabs.length - 1) {
 			const tabMsg = `本章共 ${sectionTabs.length} 个小节，当前第 ${
 				activeTabIndex + 1
@@ -1360,6 +1450,9 @@ export async function study(
 			$console.info(tabMsg);
 			$message.info({ content: tabMsg, duration: 5 });
 			await $.sleep(500);
+			if (skipInDryRun('切换到下一个小节', 'cx.next')) {
+				return;
+			}
 			sectionTabs[activeTabIndex + 1].click();
 			return;
 		}
@@ -1440,6 +1533,9 @@ export async function study(
 				if (nextChapter) {
 					const target = nextChapter;
 					CXAnalyses.scrollToActiveChapter();
+					if (skipInDryRun('跳转到下一个未完成章节', 'cx.next')) {
+						return;
+					}
 					setTimeout(() => {
 						target.querySelector<HTMLElement>('.posCatalog_name')?.click();
 					}, 500);
@@ -1471,8 +1567,32 @@ export async function study(
 				 * count, chapterId, courseId, clazzid, knowledgestr, checkType
 				 * checkType 就是询问当前章节还有任务点未完成，是否完成，这里直接不传，默认下一章
 				 */
+				if (skipInDryRun('跳转到下一节', 'cx.next')) {
+					return;
+				}
+
+				const before = readCxPosition();
 				// @ts-ignore
 				top?.PCount.next(count.length.toString(), curChapterId.value, curCourseId.value, curClazzId.value, '');
+
+				// 超星的 PCount.next 在被拦截（例如笔记未保存）或请求失败时不会有任何提示，
+				// 这里确认页面确实发生了变化，没有变化时改点击页面上的“下一节”按钮，仍然不行再提醒用户手动处理
+				if (!(await waitForCxPositionChange(before, 10 * 1000))) {
+					$console.warn('调用超星跳转后页面没有变化，尝试点击页面上的“下一节”按钮。');
+					$debug.warn('cx.next', 'PCount.next 没有生效，尝试点击下一节按钮', before);
+					const nextBtn = top?.document.querySelector<HTMLElement>('#prevNextFocusNext');
+					nextBtn?.click();
+
+					if (!(await waitForCxPositionChange(before, 8 * 1000))) {
+						const content = '自动跳转没有生效（可能是页面弹窗拦截了跳转，或网络异常），请手动点击“下一节”。';
+						$console.error(content);
+						$message.error({ content, duration: 0 });
+						CommonProject.scripts.settings.methods.notificationBySetting(content, {
+							duration: 0,
+							extraTitle: '超星学习通学习脚本'
+						});
+					}
+				}
 			} else {
 				$console.warn('参数错误，无法跳转下一章，请尝试手动切换。');
 			}
@@ -1486,12 +1606,44 @@ export async function study(
 		$message.success({ content: msg });
 		$console.info(msg);
 		await $.sleep(2000);
-		next();
+		next().catch((error) => {
+			// next 不会被等待，没有这里的捕获，跳转过程中的异常会悄悄消失，表现为“卡住不动”
+			$console.error('自动跳转时出错：' + String(error));
+			$debug.error('cx.next', '跳转过程出错', String(error));
+		});
 	} else {
 		const msg = '页面任务点已完成，自动跳转已关闭，请手动跳转。';
 		$message.warn({ content: msg, duration: 0 });
 		$console.warn(msg);
 	}
+}
+
+/** 读取当前所处的章节和小节，用于判断自动跳转是否真的生效 */
+function readCxPosition() {
+	const tabs = Array.from(top?.document.querySelectorAll<HTMLElement>('.prev_ul li') || []);
+	return {
+		chapterId: top?.document.querySelector<HTMLInputElement>('#curChapterId')?.value || '',
+		activeCatalog: top?.document.querySelector('.posCatalog_active')?.getAttribute('id') || '',
+		activeTab: tabs.findIndex((tab) => tab.classList.contains('active')),
+		cardId: top?.document.querySelector('.prev_ul li.active')?.getAttribute('cardid') || ''
+	};
+}
+
+async function waitForCxPositionChange(before: ReturnType<typeof readCxPosition>, timeoutMs: number) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		await $.sleep(500);
+		const now = readCxPosition();
+		if (
+			now.chapterId !== before.chapterId ||
+			now.activeCatalog !== before.activeCatalog ||
+			now.activeTab !== before.activeTab ||
+			now.cardId !== before.cardId
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /** 答题结束后汇总没有答出的题目并在页面上提示，避免只能到日志里才能发现 */
@@ -1724,6 +1876,14 @@ function searchJob(
 						}
 					}
 				}
+
+				$debug.log('cx.job', func ? '将执行任务点' : '不执行任务点', {
+					name: jobName,
+					kind: videojs ? 'video' : chapterTest ? 'chapterTest' : read ? 'read' : pptWithAudio ? 'ppt' : 'hyperlink',
+					work_type,
+					retryLater,
+					mid: attachment.property.mid
+				});
 
 				const job = {
 					mid: attachment.property.mid,
@@ -1972,7 +2132,25 @@ const JobRunner = {
 		 * 视频播放
 		 */
 		return new Promise<void>((resolve, reject) => {
-			// 检测视频
+			let finished = false;
+			let lastTime = media.currentTime;
+			let lastProgressAt = Date.now();
+			let stallRecovered = false;
+
+			/** 结束播放流程：清理所有定时器和监听，并停止视频内题目的循环 */
+			const finish = (action: () => void) => {
+				if (finished) {
+					return;
+				}
+				finished = true;
+				quizLoopStopped = true;
+				clearInterval(reloadInterval);
+				clearInterval(stallInterval);
+				media.removeEventListener('pause', playFunction);
+				action();
+			};
+
+			// 检测视频加载失败
 			const reloadInterval = setInterval(() => {
 				const errorDiv = doc.querySelector<HTMLElement>('.vjs-modal-dialog-content');
 				if (
@@ -1982,9 +2160,35 @@ const JobRunner = {
 				) {
 					$console.error('检测到视频加载失败，即将跳过视频。');
 					$message.error('检测到视频加载失败，即将跳过视频。');
-					setTimeout(resolve, 3000);
+					$debug.warn('cx.media', '视频加载失败，跳过', { text: errorDiv?.innerText.slice(0, 80) });
+					finish(() => setTimeout(resolve, 3000));
 				}
 			}, 3000);
+
+			// 检测播放卡住：视频没有结束也没有暂停，但播放进度长时间不前进（网络卡死等）
+			const stallInterval = setInterval(() => {
+				if (media.ended || media.paused || Math.abs(media.currentTime - lastTime) > 0.1) {
+					lastTime = media.currentTime;
+					lastProgressAt = Date.now();
+					return;
+				}
+
+				const stalledSeconds = (Date.now() - lastProgressAt) / 1000;
+				if (stalledSeconds >= 180) {
+					const msg = '视频长时间没有播放进度，已跳过该视频，请检查网络后手动补学。';
+					$console.error(msg);
+					$message.error({ content: msg, duration: 10 });
+					$debug.error('cx.media', '播放进度长时间没有变化，跳过', { stalledSeconds, currentTime: media.currentTime });
+					finish(() => resolve());
+				} else if (stalledSeconds >= 60 && !stallRecovered) {
+					stallRecovered = true;
+					$console.warn(`视频播放进度已 ${Math.round(stalledSeconds)} 秒没有变化，尝试重新播放。`);
+					$debug.warn('cx.media', '播放卡住，尝试恢复', { stalledSeconds, currentTime: media.currentTime });
+					playMedia(() => media.play()).then(() => {
+						media.playbackRate = playbackRate;
+					});
+				}
+			}, 5000);
 
 			const playFunction = async () => {
 				// 这里先判断，再检测，否则后续添加多个 await 会导致视频启动等待时间过长，导致用户误认为脚本失效
@@ -2000,14 +2204,12 @@ const JobRunner = {
 			media.addEventListener('pause', playFunction);
 
 			media.addEventListener('ended', () => {
-				media.removeEventListener('pause', playFunction);
-				quizLoopStopped = true;
 				$console.log('视频播放完毕');
-				clearInterval(reloadInterval);
-				resolve();
+				finish(() => resolve());
 			});
 
 			$console.log('视频开始播放');
+			$debug.log('cx.media', '开始播放', { name: videoName, duration: media.duration, playbackRate });
 			media.volume = volume;
 
 			// 重置视频进度
@@ -2019,7 +2221,7 @@ const JobRunner = {
 					.then(() => {
 						media.playbackRate = playbackRate;
 					})
-					.catch(reject);
+					.catch((error) => finish(() => reject(error)));
 			}, 200);
 		});
 	},
@@ -2300,7 +2502,14 @@ const JobRunner = {
 			}
 		});
 
-		const results = await worker.doWork();
+		// 章节测验也提供悬浮控制条（暂停/继续、手动搜题），与作业、考试保持一致
+		attachWorkFloatingBar(worker);
+
+		const results = await worker.doWork({ enable_debug: isDebugEnabled() });
+		$debug.log('cx.chapter', '章节测验答题完成', {
+			total: results.length,
+			finished: results.filter((result) => result.result?.finish === true).length
+		});
 		reportUnfinishedQuestions(results, '章节测验');
 
 		const autoSaveChapter = async () => {
@@ -2318,7 +2527,8 @@ const JobRunner = {
 						element.getAttribute('title')?.trim() ||
 						'';
 					const onclick = element.getAttribute('onclick') || '';
-					return /保存|暂存|暂时保存/.test(text) || /noSubmit|save/i.test(onclick);
+					// 只匹配章节测验自带的“暂存/保存”入口，避免误点页面上的“保存笔记”等无关按钮
+					return /^(暂时保存|暂存|保存)$/.test(text) || /\bnoSubmit\s*\(/.test(onclick);
 				});
 				const button = candidates.find((element) => element.offsetParent !== null) || candidates[0];
 				if (button) {
@@ -2346,9 +2556,7 @@ const JobRunner = {
 				saved = true;
 			}
 
-			if (clickSaveButton(document)) {
-				saved = true;
-			}
+			// 不再点击顶层页面里的按钮：顶层页面有笔记等区域，也存在名为“保存”的按钮
 
 			if (saved) {
 				$console.info('未达到自动提交条件，已执行自动保存。');
@@ -2381,6 +2589,10 @@ const JobRunner = {
 				$console.info(msg);
 				$message.success({ content: msg, duration: 3 });
 
+				if (skipInDryRun(uploadable ? '提交章节测验' : '保存章节测验', 'cx.chapter')) {
+					return;
+				}
+
 				await $.sleep(3000);
 
 				if (uploadable) {
@@ -2389,8 +2601,12 @@ const JobRunner = {
 					await $.sleep(3000);
 					/** 确定按钮 */
 					frameWindow?.submitCheckTimes?.();
-					// @ts-ignore 2024/4 更新后上方函数无法关闭弹窗，需要手动关闭确定弹窗
-					top.$('#workpop').hide();
+					try {
+						// @ts-ignore 2024/4 更新后上方函数无法关闭弹窗，需要手动关闭确定弹窗；部分页面没有 jQuery，需要判空
+						top?.$?.('#workpop')?.hide();
+					} catch {
+						// 关闭弹窗失败不影响后续的答案缓存
+					}
 
 					// 需要重做：有题没有答出；或者题都答出了，但提交后的批阅结果里有答错的（不是满分）。
 					// chapterAutoRetakeEnabled 只在第一次答题时为 true，所以最多自动重做一次。
@@ -2952,6 +3168,9 @@ function clickCxSaveButton() {
 }
 
 async function submitCxWorkOrExam(message: string) {
+	if (skipInDryRun('提交作业/考试', 'cx.work')) {
+		return false;
+	}
 	$console.info(message);
 	$message.info({ content: message, duration: 5 });
 
@@ -2973,6 +3192,9 @@ async function submitCxWorkOrExam(message: string) {
 }
 
 async function saveCxWorkOrExam(message: string) {
+	if (skipInDryRun('保存作业/考试', 'cx.work')) {
+		return false;
+	}
 	$console.info(message);
 	$message.info({ content: message, duration: 5 });
 
@@ -4108,3 +4330,55 @@ const CORSUtils = {
 		CommonProject.scripts.render.methods.minimize();
 	})
 };
+
+/** 页面元素快照中附带的超星状态：任务点、小节标签、章节完成情况和学习配置 */
+registerSnapshotCollector('cx', () => {
+	let isTop = false;
+	try {
+		isTop = self === top;
+	} catch {
+		isTop = false;
+	}
+
+	const attachments = ((($gm.unsafeWindow as any).attachments || []) as any[]).map((a) => ({
+		jobid: a?.jobid || a?.property?._jobid,
+		type: a?.type,
+		name: a?.property?.name || a?.property?.title,
+		mid: a?.property?.mid,
+		job: a?.job,
+		isPassed: a?.isPassed
+	}));
+
+	const studyCfg = CXProject.scripts.study.cfg;
+	return {
+		isTop,
+		study: {
+			mode: studyCfg.mode,
+			playbackRate: studyCfg.playbackRate,
+			volume: studyCfg.volume,
+			restudy: studyCfg.restudy,
+			forceLearn: studyCfg.forceLearn,
+			enableMedia: studyCfg.enableMedia,
+			enableChapterTest: studyCfg.enableChapterTest,
+			enablePPT: studyCfg.enablePPT,
+			enableHyperlink: studyCfg.enableHyperlink,
+			videoQuizStrategy: studyCfg.videoQuizStrategy
+		},
+		attachments,
+		...(isTop
+			? {
+					position: readCxPosition(),
+					sectionTabs: Array.from(top?.document.querySelectorAll<HTMLElement>('.prev_ul li') || []).map((li) => ({
+						className: li.className,
+						text: li.textContent?.trim(),
+						cardid: li.getAttribute('cardid')
+					})),
+					chapters: CXAnalyses.getChapterInfos()
+						.slice(0, 300)
+						.map((chapter) => ({ chapterId: chapter.chapterId, unFinishCount: chapter.unFinishCount })),
+					isInFinalTab: CXAnalyses.isInFinalTab(),
+					isInFinalChapter: Boolean(CXAnalyses.isInFinalChapter())
+			  }
+			: {})
+	};
+});

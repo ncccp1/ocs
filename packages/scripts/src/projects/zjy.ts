@@ -1,5 +1,6 @@
 import { $, OCSWorker } from '@ocsjs/core';
 import { Project, Script, $ui, $el, $message, $modal, h } from 'easy-us';
+import { isDebugEnabled } from '../utils/debug';
 import { volume } from '../utils/configs';
 import { waitForMedia, waitForElement } from '../utils/study';
 import { CommonWorkOptions, playMedia } from '../utils';
@@ -373,6 +374,11 @@ async function watchFile(pptReadPeriod: number) {
 		return;
 	}
 
+	/** 翻页没有生效（页码不再变化）的连续次数，以及总翻页次数，用于防止永远循环 */
+	let stuckCount = 0;
+	let lastCurrent = -1;
+	let turns = 0;
+
 	while (true) {
 		const [current, total] =
 			document
@@ -387,6 +393,16 @@ async function watchFile(pptReadPeriod: number) {
 			break;
 		}
 		if (current >= total - 1) {
+			break;
+		}
+		if (current === lastCurrent) {
+			stuckCount++;
+		} else {
+			stuckCount = 0;
+			lastCurrent = current;
+		}
+		if (stuckCount >= 5 || ++turns > Math.max(total * 3, 100)) {
+			$console.warn('PPT 翻页没有生效，已停止自动翻页，请手动检查。');
 			break;
 		}
 		await $.sleep(pptReadPeriod * 1000);
@@ -716,7 +732,7 @@ function workOrExam(
 	});
 
 	worker
-		.doWork({ enable_debug: true })
+		.doWork({ enable_debug: isDebugEnabled() })
 		.then(() => {
 			$message.info({ content: '作业/考试完成，请自行检查后保存或提交。', duration: 0 });
 			worker.emit('done');

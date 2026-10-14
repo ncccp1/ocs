@@ -1,7 +1,14 @@
-import { AnswererWrapper, Result, SearchInformation, defaultAnswerWrapperHandler } from '@ocsjs/core';
+import {
+	AnswererWrapper,
+	AnswerWrapperHandlerConfig,
+	Result,
+	SearchInformation,
+	defaultAnswerWrapperHandler
+} from '@ocsjs/core';
 import { $, $message, $store } from 'easy-us';
 import md5 from 'md5';
 import { $searchConsole } from './logger';
+import { $debug } from './debug';
 import { isAnswerUsableForOptions, normalizeText, textSimilarity } from './option-match';
 
 export type SearchScene = 'auto' | 'manual-single' | 'manual-batch';
@@ -30,16 +37,22 @@ export type MetoAuthConfig = {
 	userId: string;
 };
 
+/**
+ * MeTo 认证信息必须由用户自己填写（通用 -> 全局设置），脚本不再内置任何默认账号。
+ * 获取方法见 通用 -> 全局设置 里的“MeTo 认证获取教程”，或仓库中的 MeTo题库API文档.md。
+ */
 export const DEFAULT_METO_AUTH_CONFIG: MetoAuthConfig = {
 	server: 'https://m.metst.cn',
-	tkUid: '397265',
-	poolId: '2efc793b-661c-1760-d1ad-e51614113424',
-	pp: '9ffb0a9f',
+	tkUid: '',
+	poolId: '',
+	pp: '',
 	userId: ''
 };
 
 const METO_DEFAULT_SERVERS = ['https://m.metst.cn', 'https://m.metost.com'];
 const METO_MAX_RETRY_COUNT = 2;
+/** MeTo 单次请求的超时时间（毫秒），超时后会按重试逻辑换服务器重试 */
+const METO_REQUEST_TIMEOUT = 30 * 1000;
 
 const COMMON_SETTINGS_NAMESPACE = 'common.settings';
 
@@ -71,14 +84,9 @@ function stringifyError(error: unknown) {
 	return typeof error === 'string' ? error : JSON.stringify(error);
 }
 
+/** 题干规范化：与题库缓存、搜题可信度判断共用同一套规则（option-match 的 normalizeText），避免各处判断不一致 */
 function normalizeQuestion(text: string) {
-	return String(text || '')
-		.replace(/<[^>]+>/g, '')
-		.replace(/&nbsp;|&#160;/gi, '')
-		.replace(/\s+/g, '')
-		.replace(/[[\]（）()【】]/g, '')
-		.replace(/[。．.、,，;；:：!！?？]/g, '')
-		.trim();
+	return normalizeText(String(text || '').replace(/&nbsp;|&#160;/gi, ''));
 }
 
 function getMetoServerCandidates(server: string) {
@@ -310,6 +318,217 @@ async function postJson(
 	};
 }
 
+/**
+ * 解析 SSE（text/event-stream）格式的 chat/completions 流式响应，
+ * 合并成与非流式响应相同的结构，下游代码无需关心是否为流式。
+ */
+function parseChatStream(text: string) {
+	let content = '';
+	let reasoning = '';
+	let finishReason: string | undefined;
+	let usage: unknown;
+	let error: unknown;
+	let sawEvent = false;
+
+	for (const rawLine of text.split('\n')) {
+		const line = rawLine.trim();
+		if (!line.startsWith('data:')) {
+			continue;
+		}
+		const data = line.slice(5).trim();
+		if (!data || data === '[DONE]') {
+			continue;
+		}
+		const json = parseResponseText(data);
+		if (!json || typeof json !== 'object') {
+			continue;
+		}
+		sawEvent = true;
+		if (json.error) {
+			error = json.error;
+			continue;
+		}
+		const choice = json.choices?.[0];
+		const delta = choice?.delta;
+		if (typeof delta?.content === 'string') {
+			content += delta.content;
+		}
+		if (typeof delta?.reasoning_content === 'string') {
+			reasoning += delta.reasoning_content;
+		}
+		if (choice?.finish_reason) {
+			finishReason = choice.finish_reason;
+		}
+		if (json.usage) {
+			usage = json.usage;
+		}
+	}
+
+	return { sawEvent, content, reasoning, finishReason, usage, error };
+}
+
+export function buildChatResponse(
+	url: string,
+	requestBody: Record<string, any>,
+	status: number,
+	text: string
+): MetoRequestResponse {
+	const plain = { url, status, requestBody, text, json: parseResponseText(text.trim()) };
+	if (status < 200 || status >= 300) {
+		return plain;
+	}
+
+	const stream = parseChatStream(text);
+	// 服务端没有按流式返回（直接返回了完整 JSON），按普通响应处理
+	if (!stream.sawEvent) {
+		return plain;
+	}
+	if (stream.error) {
+		return { url, status: 502, requestBody, text, json: { error: stream.error } };
+	}
+
+	return {
+		url,
+		status,
+		requestBody,
+		text: stream.content,
+		json: {
+			choices: [
+				{
+					message: { content: stream.content, reasoning_content: stream.reasoning },
+					finish_reason: stream.finishReason
+				}
+			],
+			usage: stream.usage
+		}
+	};
+}
+
+/**
+ * 以流式（SSE）方式请求 chat/completions。
+ *
+ * 为什么用流式：AI 开启深度思考后可能思考几分钟，一次性等待完整响应只能设置一个很长的固定超时，
+ * 连接真的卡死时也要傻等。流式传输时每收到一点数据都代表“还活着”，因此只需要：
+ *  - idleMs：超过这么久完全没有数据，认为卡死（只在收到过数据之后才生效，兼容不支持流式回调的脚本管理器）；
+ *  - totalMs：整个请求允许的最长时间。
+ */
+export async function postChatStream(
+	url: string,
+	body: Record<string, any>,
+	extraHeaders: Record<string, string>,
+	limits: { idleMs: number; totalMs: number }
+): Promise<MetoRequestResponse> {
+	const requestBody = { ...body, stream: true };
+	const headers = {
+		'Content-Type': 'application/json; charset=utf-8',
+		Accept: 'text/event-stream',
+		...extraHeaders
+	};
+	const startedAt = Date.now();
+
+	const gmRequest = globalThis.GM_xmlhttpRequest;
+	if (typeof gmRequest !== 'undefined') {
+		return new Promise<MetoRequestResponse>((resolve, reject) => {
+			let finished = false;
+			let lastActivity = Date.now();
+			let sawProgress = false;
+
+			const touch = () => {
+				sawProgress = true;
+				lastActivity = Date.now();
+			};
+			const finish = (action: () => void) => {
+				if (finished) {
+					return;
+				}
+				finished = true;
+				clearInterval(watchdog);
+				action();
+			};
+			const abort = () => {
+				try {
+					(handle as { abort?: () => void } | undefined)?.abort?.();
+				} catch {
+					// 取消失败时请求会自行结束
+				}
+			};
+
+			const watchdog = setInterval(() => {
+				const now = Date.now();
+				if (now - startedAt > limits.totalMs) {
+					finish(() => {
+						abort();
+						reject(new Error(`AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1000)} 秒）`));
+					});
+				} else if (sawProgress && now - lastActivity > limits.idleMs) {
+					finish(() => {
+						abort();
+						reject(new Error(`AI 超过 ${Math.round(limits.idleMs / 1000)} 秒没有返回任何内容`));
+					});
+				}
+			}, 2000);
+
+			const handle = gmRequest({
+				url,
+				method: 'POST',
+				headers,
+				data: JSON.stringify(requestBody),
+				onprogress: touch,
+				onreadystatechange: touch,
+				onload: (response: any) =>
+					finish(() => resolve(buildChatResponse(url, body, response.status, response.responseText || ''))),
+				onerror: (error: unknown) => finish(() => reject(error)),
+				ontimeout: () => finish(() => reject(new Error('请求超时'))),
+				onabort: () => finish(() => reject(new Error('请求已取消')))
+			} as any) as any;
+		});
+	}
+
+	// 非脚本管理器环境（例如本地调试页面）：使用 fetch 读取流
+	const controller = new AbortController();
+	let timedOut: string | undefined;
+	let lastActivity = Date.now();
+	const watchdog = setInterval(() => {
+		const now = Date.now();
+		if (now - startedAt > limits.totalMs) {
+			timedOut = `AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1000)} 秒）`;
+			controller.abort();
+		} else if (now - lastActivity > limits.idleMs) {
+			timedOut = `AI 超过 ${Math.round(limits.idleMs / 1000)} 秒没有返回任何内容`;
+			controller.abort();
+		}
+	}, 2000);
+
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers,
+			body: JSON.stringify(requestBody),
+			signal: controller.signal
+		});
+		let text = '';
+		if (response.body && typeof response.body.getReader === 'function') {
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder();
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) {
+					break;
+				}
+				lastActivity = Date.now();
+				text += decoder.decode(value, { stream: true });
+			}
+		} else {
+			text = await response.text();
+		}
+		return buildChatResponse(url, body, response.status, text);
+	} catch (error) {
+		throw timedOut ? new Error(timedOut) : error;
+	} finally {
+		clearInterval(watchdog);
+	}
+}
+
 async function requestMeto(
 	path: string,
 	payload: Record<string, any>,
@@ -318,10 +537,12 @@ async function requestMeto(
 ): Promise<MetoRequestResponse> {
 	const auth = getResolvedMetoAuthConfig();
 	if (!auth.tkUid) {
-		throw new Error('MeTo 认证配置缺少 tk_uid，请前往 通用-全局设置 补充。');
+		throw new Error('MeTo 认证配置缺少 tk_uid，请前往 通用-全局设置 填写（点击“MeTo 认证获取教程”查看获取方法）。');
 	}
 	if (!auth.poolId) {
-		throw new Error('MeTo 认证配置缺少 poolId，请前往 通用-全局设置 补充，或者填写 user_id + pp 自动计算。');
+		throw new Error(
+			'MeTo 认证配置缺少 poolId，请前往 通用-全局设置 填写，或者填写 user_id + pp 自动计算（点击“MeTo 认证获取教程”查看获取方法）。'
+		);
 	}
 
 	const servers = getMetoServerCandidates(auth.server);
@@ -348,7 +569,7 @@ async function requestMeto(
 			});
 
 			try {
-				const response = await postJson(url, requestBody);
+				const response = await postJson(url, requestBody, {}, METO_REQUEST_TIMEOUT);
 				lastResponse = response;
 
 				$searchConsole.debug(`[${scene}] ${path} 响应状态 ${response.status}`, {
@@ -647,10 +868,16 @@ const AI_STORE_KEYS = {
 	extraBody: $.namespaceKey(COMMON_SETTINGS_NAMESPACE, 'aiExtraBody'),
 	useImages: $.namespaceKey(COMMON_SETTINGS_NAMESPACE, 'aiUseImages'),
 	thinking: $.namespaceKey(COMMON_SETTINGS_NAMESPACE, 'aiThinking'),
-	webSearch: $.namespaceKey(COMMON_SETTINGS_NAMESPACE, 'aiWebSearch')
+	webSearch: $.namespaceKey(COMMON_SETTINGS_NAMESPACE, 'aiWebSearch'),
+	maxWait: $.namespaceKey(COMMON_SETTINGS_NAMESPACE, 'aiMaxWait')
 };
 
-const AI_REQUEST_TIMEOUT = 120 * 1000;
+/** AI 单道题默认最长等待时间（秒），含思考、联网搜索和重试，可在 通用 -> 全局设置 中调整 */
+export const DEFAULT_AI_MAX_WAIT_SECONDS = 600;
+/** 流式传输时，超过这个时间没有收到任何数据，认为连接已经卡死（毫秒） */
+const AI_IDLE_TIMEOUT = 120 * 1000;
+/** 剩余时间低于这个值时，不再发起新的可选请求（联网搜索、重新作答），避免超过总时限 */
+const AI_MIN_REMAINING_FOR_OPTIONAL = 20 * 1000;
 const AI_SYSTEM_PROMPT = [
 	'你是严谨的题库答题助手。根据给出的题型、题目和选项作答，只输出一个 JSON 对象，不要输出任何其他内容。',
 	'JSON 格式：{"answer": "答案", "option": "", "reason": "一句话理由", "confidence": "high", "search_query": "", "insufficient": false}',
@@ -700,8 +927,28 @@ function getAiConfig() {
 		extraBody: String($store.get(AI_STORE_KEYS.extraBody, '') || '').trim(),
 		useImages: ($store.get(AI_STORE_KEYS.useImages, true) as unknown) !== false,
 		thinking: ($store.get(AI_STORE_KEYS.thinking, true) as unknown) !== false,
-		webSearch: ($store.get(AI_STORE_KEYS.webSearch, true) as unknown) !== false
+		webSearch: ($store.get(AI_STORE_KEYS.webSearch, true) as unknown) !== false,
+		maxWaitSeconds: normalizeAiMaxWait($store.get(AI_STORE_KEYS.maxWait, DEFAULT_AI_MAX_WAIT_SECONDS))
 	};
+}
+
+function normalizeAiMaxWait(value: unknown) {
+	const seconds = Number(value);
+	if (!Number.isFinite(seconds) || seconds <= 0) {
+		return DEFAULT_AI_MAX_WAIT_SECONDS;
+	}
+	return Math.min(1800, Math.max(60, Math.round(seconds)));
+}
+
+/** AI 答题开启时，答题线程需要额外等待的秒数（用于设置 AnswerWrapperHandlerConfig.extra_wait_seconds） */
+export function getAiExtraWaitSeconds() {
+	const config = getAiConfig();
+	return config.enable ? config.maxWaitSeconds + 30 : 0;
+}
+
+/** 同步答题线程的等待时间：AI 答题可能思考很久，不能被默认的搜题超时误判为失败 */
+export function syncAiWaitConfig() {
+	AnswerWrapperHandlerConfig.extra_wait_seconds = getAiExtraWaitSeconds();
 }
 
 function createAiWrapper(url: string, model: string) {
@@ -824,7 +1071,7 @@ export function isAiAnswererAvailable() {
 	return config.enable && Boolean(config.apiKey);
 }
 
-const NATIVE_SEARCH_TIMEOUT = 180 * 1000;
+const NATIVE_SEARCH_TIMEOUT = 300 * 1000;
 
 /**
  * DeepSeek 原生联网搜索。
@@ -838,6 +1085,7 @@ async function nativeWebSearchAnswer(options: {
 	model: string;
 	userText: string;
 	images: AiImagePart[];
+	timeoutMs?: number;
 }) {
 	let origin = '';
 	try {
@@ -870,7 +1118,7 @@ async function nativeWebSearchAnswer(options: {
 			messages: [{ role: 'user', content }]
 		},
 		{ 'x-api-key': options.apiKey, 'anthropic-version': '2023-06-01' },
-		NATIVE_SEARCH_TIMEOUT
+		Math.min(NATIVE_SEARCH_TIMEOUT, options.timeoutMs || NATIVE_SEARCH_TIMEOUT)
 	);
 
 	if (response.status < 200 || response.status >= 300 || !Array.isArray(response.json?.content)) {
@@ -969,12 +1217,16 @@ async function postJsonWithRetry(
 	url: string,
 	body: Record<string, any>,
 	headers: Record<string, string>,
-	timeout: number
+	timeout: number,
+	/** 使用流式传输：timeout 为总时限，同时启用“长时间无数据”检测 */
+	stream = false
 ) {
 	let lastError: unknown;
 	for (let attempt = 0; attempt <= 2; attempt++) {
 		try {
-			const response = await postJson(url, body, headers, timeout);
+			const response = stream
+				? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: timeout })
+				: await postJson(url, body, headers, timeout);
 			const retryable =
 				response.status === 408 ||
 				response.status === 409 ||
@@ -1072,6 +1324,12 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 	const url = /\/chat\/completions$/.test(config.baseUrl) ? config.baseUrl : `${config.baseUrl}/chat/completions`;
 	const wrapper = createAiWrapper(url, config.model);
 
+	/** 单道题的总时限：思考、联网搜索、重试都计入其中，超过后返回已有结果或失败 */
+	const startedAt = Date.now();
+	const maxWaitMs = config.maxWaitSeconds * 1000;
+	const remaining = () => Math.max(0, maxWaitMs - (Date.now() - startedAt));
+	const authHeaders = { Authorization: `Bearer ${config.apiKey}` };
+
 	if (!config.apiKey) {
 		$searchConsole.warn('已开启 AI 答题，但未填写 API Key，请前往 通用-全局设置 配置。');
 		return createEmptySearchInfo(wrapper, '未填写 AI API Key');
@@ -1108,9 +1366,12 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 			const imageUrl = imageUrls[index];
 			promptTitle = promptTitle.split(imageUrl).join(`【图片${index + 1}】`);
 			promptOptions = promptOptions.split(imageUrl).join(`【图片${index + 1}】`);
-			const dataUrl = await downloadImageAsDataUrl(imageUrl);
-			imageParts.push({ type: 'image_url', image_url: { url: dataUrl || imageUrl } });
 		}
+		// 并行下载图片，避免多张图片逐张等待占用答题的总时限
+		const dataUrls = await Promise.all(imageUrls.map((imageUrl) => downloadImageAsDataUrl(imageUrl)));
+		imageUrls.forEach((imageUrl, index) => {
+			imageParts.push({ type: 'image_url', image_url: { url: dataUrls[index] || imageUrl } });
+		});
 
 		// 选项（大部分）是图片时，补全 A/B/C/D 字母，让 AI 回答字母
 		if (imageParts.length) {
@@ -1251,12 +1512,23 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 				attempt: attempt + 1
 			});
 
-			const response = await postJsonWithRetry(
-				url,
-				requestBody,
-				{ Authorization: `Bearer ${config.apiKey}` },
-				AI_REQUEST_TIMEOUT
-			);
+			if (remaining() < 5000) {
+				$searchConsole.warn(`AI 答题已超过最长等待时间（${config.maxWaitSeconds} 秒）: ${title}`);
+				notifyAiFailure(title, `超过最长等待时间 ${config.maxWaitSeconds} 秒`);
+				return createEmptySearchInfo(wrapper, `AI 答题超过最长等待时间（${config.maxWaitSeconds} 秒）`);
+			}
+
+			$debug.log('ai', '开始请求', {
+				title: title.slice(0, 40),
+				attempt: attempt + 1,
+				remainingSeconds: Math.round(remaining() / 1000)
+			});
+			const response = await postJsonWithRetry(url, requestBody, authHeaders, remaining(), true);
+			$debug.log('ai', '收到响应', {
+				status: response.status,
+				elapsedSeconds: Math.round((Date.now() - startedAt) / 1000),
+				reasoningChars: String(response.json?.choices?.[0]?.message?.reasoning_content || '').length
+			});
 			if (response.status < 200 || response.status >= 300) {
 				const message = response.json?.error?.message || response.text || `HTTP ${response.status}`;
 
@@ -1300,7 +1572,12 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 			let searchedQuery = '';
 
 			// AI 不确定（没有答案或信心不足）时，强制联网搜索，把搜索结果交给 AI 再答一次（视频内题目与视频强相关，搜索没有意义）
-			if (config.webSearch && !isVideoQuiz && (!parsed.answer || parsed.confidence === 'low')) {
+			if (
+				config.webSearch &&
+				!isVideoQuiz &&
+				(!parsed.answer || parsed.confidence === 'low') &&
+				remaining() >= AI_MIN_REMAINING_FOR_OPTIONAL
+			) {
 				const query = parsed.searchQuery || promptTitle;
 				$searchConsole.info(`AI 不确定，正在联网搜索: ${query}`, { title });
 
@@ -1312,7 +1589,8 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 						apiKey: config.apiKey,
 						model: config.model,
 						userText: buildUserText(imageParts),
-						images: imageParts
+						images: imageParts,
+						timeoutMs: remaining()
 					});
 				} catch (error) {
 					native = undefined;
@@ -1325,15 +1603,13 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 				} else {
 					const snippets = await searchWeb(query);
 
-					if (snippets) {
+					if (snippets && remaining() >= AI_MIN_REMAINING_FOR_OPTIONAL) {
 						const searchBody = buildRequestBody(imageParts, useThinking, snippets);
 						try {
-							const searchResponse = await postJson(
-								url,
-								searchBody,
-								{ Authorization: `Bearer ${config.apiKey}` },
-								AI_REQUEST_TIMEOUT
-							);
+							const searchResponse = await postChatStream(url, searchBody, authHeaders, {
+								idleMs: AI_IDLE_TIMEOUT,
+								totalMs: Math.max(remaining(), 10 * 1000)
+							});
 							const searchContent = String(searchResponse.json?.choices?.[0]?.message?.content || '');
 							const searchParsed =
 								searchResponse.status >= 200 && searchResponse.status < 300 && searchContent
@@ -1378,15 +1654,16 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 					`请重新作答：answer 恰好包含 ${blankCount} 个答案，按空的先后顺序用 # 连接。`;
 			}
 
-			if (followHint) {
+			if (followHint && remaining() >= AI_MIN_REMAINING_FOR_OPTIONAL) {
 				$searchConsole.warn(`AI 的答案不符合题目要求，重新请求: ${title}`, { answer: result.answer, blankCount });
 				try {
 					const followBody = buildRequestBody(imageParts, useThinking, '', followHint);
 					const followResponse = await postJsonWithRetry(
 						url,
 						followBody,
-						{ Authorization: `Bearer ${config.apiKey}` },
-						AI_REQUEST_TIMEOUT
+						authHeaders,
+						Math.max(remaining(), 10 * 1000),
+						true
 					);
 					const followContent = String(followResponse.json?.choices?.[0]?.message?.content || '');
 					const followParsed =
@@ -1416,7 +1693,8 @@ async function searchAiQuestion(env: SearchEnv, scene: SearchScene): Promise<Sea
 				answerText: result.answer,
 				reason: result.reason,
 				confidence: result.confidence,
-				webSearch: Boolean(searchedQuery)
+				webSearch: Boolean(searchedQuery),
+				elapsedSeconds: Math.round((Date.now() - startedAt) / 1000)
 			});
 			return toSearchInfo(
 				wrapper,
@@ -1511,18 +1789,56 @@ function hasCredibleResult(title: string, infos: SearchInformation[], optionsTex
 	);
 }
 
-export async function searchAnswerInWrappers(wrappers: AnswererWrapper[], env: SearchEnv, scene: SearchScene = 'auto') {
-	const infos: SearchInformation[] = [];
-	for (const wrapper of wrappers) {
-		if (isMetoWrapper(wrapper)) {
-			infos.push(await searchMetoQuestion(wrapper, env, scene));
-		} else {
-			infos.push(await searchGenericWrapper(wrapper, env, scene));
+/**
+ * 为单个题库的搜题加上总时限（题库超时设置，默认 120 秒）。
+ * 通用题库自带超时，但 MeTo 等直连题库没有，一次卡死会让整个答题流程一直等待。
+ */
+async function searchWrapperWithDeadline(wrapper: AnswererWrapper, env: SearchEnv, scene: SearchScene) {
+	const seconds = AnswerWrapperHandlerConfig.timeout_seconds || 60;
+	const startedAt = Date.now();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	const work = isMetoWrapper(wrapper)
+		? searchMetoQuestion(wrapper, env, scene)
+		: searchGenericWrapper(wrapper, env, scene);
+	const timeout = new Promise<SearchInformation>((resolve) => {
+		timer = setTimeout(() => {
+			$searchConsole.warn(`${wrapper.name} 超过 ${seconds} 秒没有响应，已放弃`, { question: env.title });
+			resolve(createEmptySearchInfo(wrapper, `题库请求超时（超过 ${seconds} 秒）`));
+		}, seconds * 1000);
+	});
+
+	try {
+		const info = await Promise.race([work, timeout]);
+		$debug.log('answerer', `${wrapper.name} 完成`, {
+			results: info.results.length,
+			error: info.error,
+			elapsedSeconds: Math.round((Date.now() - startedAt) / 100) / 10
+		});
+		return info;
+	} catch (error) {
+		return createEmptySearchInfo(wrapper, stringifyError(error));
+	} finally {
+		if (timer) {
+			clearTimeout(timer);
 		}
 	}
+}
+
+export async function searchAnswerInWrappers(wrappers: AnswererWrapper[], env: SearchEnv, scene: SearchScene = 'auto') {
+	// 所有题库并行搜索，总耗时取决于最慢的一个，而不是所有题库耗时相加
+	const infos: SearchInformation[] = await Promise.all(
+		wrappers.map((wrapper) => searchWrapperWithDeadline(wrapper, env, scene))
+	);
 
 	// 所有题库都没有可信的结果（没有结果，或只有不相关/占位的答案）时，使用 AI 兜底
-	if (!hasCredibleResult(String(env.title || ''), infos, String(env.options || ''))) {
+	const credible = hasCredibleResult(String(env.title || ''), infos, String(env.options || ''));
+	$debug.log('answerer', credible ? '题库已有可信结果' : '题库没有可信结果，尝试 AI 兜底', {
+		title: String(env.title || '').slice(0, 40),
+		wrappers: wrappers.length,
+		results: infos.map((info) => info.results.length)
+	});
+	if (!credible) {
 		const aiInfo = await searchAiQuestion(env, scene);
 		if (aiInfo) {
 			// AI 有答案时放在最前面，避免不相关的题库结果（例如判断题里的“T”）被优先采用
@@ -1546,18 +1862,29 @@ export async function searchQuestionsInWrappers(
 	const normalizedQuestions = questions.map((item) => item.trim()).filter(Boolean);
 	const results: QuestionSearchResult[] = normalizedQuestions.map((question) => ({ question, infos: [] }));
 
-	for (const wrapper of wrappers) {
-		if (isMetoWrapper(wrapper)) {
-			const metoResults = await searchMetoQuestions(wrapper, normalizedQuestions, scene);
-			for (const result of metoResults) {
-				const current = results.find((item) => item.question === result.question);
-				if (current) {
-					current.infos.push(...result.infos);
-				}
+	// 各题库并行搜索；同一个题库内部仍然逐题请求，避免短时间内发出大量请求
+	const perWrapper = await Promise.all(
+		wrappers.map(async (wrapper): Promise<QuestionSearchResult[]> => {
+			if (isMetoWrapper(wrapper)) {
+				return await searchMetoQuestions(wrapper, normalizedQuestions, scene);
 			}
-		} else {
-			for (const result of results) {
-				result.infos.push(await searchGenericWrapper(wrapper, { ...baseEnv, title: result.question }, scene));
+			const list: QuestionSearchResult[] = [];
+			for (const question of normalizedQuestions) {
+				list.push({
+					question,
+					infos: [await searchWrapperWithDeadline(wrapper, { ...baseEnv, title: question }, scene)]
+				});
+			}
+			return list;
+		})
+	);
+
+	// 按题库顺序合并，保证搜索结果的顺序与题库配置顺序一致
+	for (const wrapperResults of perWrapper) {
+		for (const result of wrapperResults) {
+			const current = results.find((item) => item.question === result.question);
+			if (current) {
+				current.infos.push(...result.infos);
 			}
 		}
 	}

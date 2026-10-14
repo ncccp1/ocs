@@ -1,5 +1,6 @@
 import { $, SimplifyWorkResult, OCSWorker, createDefaultQuestionResolver, splitAnswer } from '@ocsjs/core';
 import { $gm, cors, $message, $$el, $modal, $el, Project, Script, $ui, h } from 'easy-us';
+import { isDebugEnabled } from '../utils/debug';
 import { playbackRate, restudy, volume } from '../utils/configs';
 import { CommonWorkOptions, playMedia } from '../utils';
 import { searchAnswerInWrappers } from '../utils/answerer';
@@ -927,7 +928,7 @@ function work({ answererWrappers, period, thread, answerSeparators, answerMatchM
 
 	(async () => {
 		while (next && worker.isClose === false) {
-			await worker.doWork({ enable_debug: true });
+			await worker.doWork({ enable_debug: isDebugEnabled() });
 			await $.sleep(1000);
 			next = getNextBtn();
 			if (next.style.display === 'none') {
@@ -1070,7 +1071,7 @@ function aiWork({ answererWrappers, period, thread, answerSeparators, answerMatc
 
 	(async () => {
 		while (next && worker.isClose === false) {
-			await worker.doWork({ enable_debug: true });
+			await worker.doWork({ enable_debug: isDebugEnabled() });
 			await $.sleep(1000);
 			next = getNextBtn();
 			if (next.getAttribute('disabled')) {

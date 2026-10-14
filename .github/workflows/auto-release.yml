@@ -1,5 +1,6 @@
-# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
+# 推送 tag 时自动构建并创建 GitHub Release（附带用户脚本文件）
+# 脚本管理器的自动更新读取的是 main 分支上的 release/ 目录，不依赖这里的 Release，
+# 这里的 Release 只是方便手动下载和查看更新日志。
 
 name: Userscript Auto Releases
 
@@ -24,13 +25,10 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - name: Setup env
         run: |
-          echo 'BUILD_PATH="../release"' > ./scripts/.env 
-          echo 'VITE_BUILD_PATH="../../release"' > ./packages/core/.env
-          echo 'VITE_BUILD_PATH="../../release"' > ./packages/scripts/.env
           echo "BUILDTIME=$(TZ=Asia/Shanghai date)" >> $GITHUB_ENV
           VERSION=$(jq -r .version package.json)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "DOWNLOAD_URL=https://github.com/ocsjs/ocsjs/releases/download/$VERSION/" >> $GITHUB_ENV
+          echo "DOWNLOAD_URL=https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" >> $GITHUB_ENV
       - name: Install Dependencies
         run: |
           npm install pnpm -g
@@ -39,7 +37,8 @@ jobs:
           pnpm install
           cd ../../
           npm run tsc
-      - name: Build ocs scripts
+      # 构建会输出到 dist/，并同步生成 release/ 目录
+      - name: Build scripts
         run: npm run build
 
       - name: Build ChangeLogs
@@ -80,13 +79,12 @@ jobs:
 
           ## 资源下载列表
 
-          - [用户脚本](${{ env.DOWNLOAD_URL }}ocs.user.js)
-          - [用户脚本(全域名通用版)](${{ env.DOWNLOAD_URL }}ocs.common.user.js)
-          - [核心库](${{ env.DOWNLOAD_URL }}core.js)
+          - [用户脚本](${{ env.DOWNLOAD_URL }}nanchengpai.user.js)
+          - [用户脚本(全域名通用版)](${{ env.DOWNLOAD_URL }}nanchengpai.common.user.js)
           - [简洁更新日志](${{ env.DOWNLOAD_URL }}CHANGELOG_SIMPLIFIED.md)
 
           ### 快捷访问
-          - [官网](https://docs.ocsjs.com/)
+          - [项目主页](https://github.com/${{ github.repository }})
 
           Created at ${{ env.BUILDTIME }}.
           EOF
@@ -95,5 +93,5 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           artifactContentType: "html/text"
-          artifacts: "./release/ocs.user.js,./release/ocs.common.user.js,./release/core.js,./release/index.js,./CHANGELOG_SIMPLIFIED.md"
+          artifacts: "./release/nanchengpai.user.js,./release/nanchengpai.common.user.js,./CHANGELOG_SIMPLIFIED.md"
           bodyFile: "./release.txt"

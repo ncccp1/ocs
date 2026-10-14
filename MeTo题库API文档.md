@@ -40,26 +40,39 @@
 
 ---
 
-## 默认认证配置
+## 认证配置（需要自行填写）
 
-```json
-{
-  "tk_uid": "397265",
-  "poolId": "2efc793b-661c-1760-d1ad-e51614113424",
-  "pp": "9ffb0a9f",
-  "user_id": ""
-}
-```
+> 自 4.12.46 起，脚本**不再内置任何默认的 MeTo 账号**，需要填写你自己的认证信息，否则 MeTo 题库无法使用。
+> 之前版本里写死的默认账号不再提供，也不建议继续使用他人的账号。
 
-脚本中对应可配置项：
+脚本中对应可配置项（`通用 -> 全局设置`）：
 
-- `server`
-- `tk_uid`
-- `poolId`
-- `pp`
-- `user_id`
+| 配置项 | 说明 |
+|------|------|
+| `server` | 服务地址，默认 `https://m.metst.cn`，可切换为 `https://m.metost.com` |
+| `tk_uid` | 请求体中的 `userId` |
+| `poolId` | 请求体中的 `poolId`；留空时可用 `user_id + pp` 自动计算 |
+| `pp` | 密钥种子，可选，仅用于重新计算 `poolId` |
+| `user_id` | 平台用户 ID，可选，仅用于重新计算 `poolId` |
 
-配置入口：`通用 -> 全局设置`
+在设置页点击“**MeTo 认证获取教程**”也可以查看下面的步骤。
+
+### 如何获取 tk_uid 和 poolId
+
+> 说明：MeTo 官方文档站（`doc.metst.cn`）目前没有公开说明这些值的获取方式，下面的方法是根据本文档中记录的请求格式整理的：
+> 搜题请求的请求体里包含 `userId`（即 `tk_uid`）和 `poolId`。
+
+1. 安装并登录 MeTo 官方脚本。登录使用邮箱，登录邮件里的链接需要在“已安装脚本的浏览器”中打开。
+2. 打开任意网课答题页面，让 MeTo 官方脚本执行一次搜题。
+3. 按 `F12` 打开开发者工具，切换到“网络（Network）”，在筛选框输入 `queryProblems`。
+4. 点击这条请求，在“载荷（Payload）/请求负载”中可以看到 JSON：
+   - `userId` 的值 → 填入 `tk_uid`
+   - `poolId` 的值 → 填入 `poolId`
+5. 回到 `通用 -> 全局设置` 填入并保存即可，下一次搜题生效。
+
+`pp` 与 `user_id` 只有在拿不到 `poolId` 时才需要，可点击“重算 MeTo poolId”自动计算。
+
+> ⚠️ 这些值等同于你的账号凭证：不要分享给他人，也不要把包含它们的“导出全部设置”文件发给别人。
 
 ---
 
@@ -118,9 +131,9 @@ function generateToken(timeErrorRate = 0) {
 
 ```json
 {
-  "poolId": "2efc793b-661c-1760-d1ad-e51614113424",
+  "poolId": "<your-pool-id>",
   "token": "<dynamic-token>",
-  "userId": "397265"
+  "userId": "<your-tk-uid>"
 }
 ```
 
@@ -134,9 +147,9 @@ function generateToken(timeErrorRate = 0) {
 
 ```json
 {
-  "poolId": "2efc793b-661c-1760-d1ad-e51614113424",
+  "poolId": "<your-pool-id>",
   "token": "<dynamic-token>",
-  "userId": "397265",
+  "userId": "<your-tk-uid>",
   "querry": {
     "operator": "contains",
     "argument1": "problemText",
@@ -149,9 +162,9 @@ function generateToken(timeErrorRate = 0) {
 
 ```json
 {
-  "poolId": "2efc793b-661c-1760-d1ad-e51614113424",
+  "poolId": "<your-pool-id>",
   "token": "<dynamic-token>",
-  "userId": "397265",
+  "userId": "<your-tk-uid>",
   "querry": {
     "operator": "mulit",
     "argument1": "1",
@@ -173,9 +186,9 @@ function generateToken(timeErrorRate = 0) {
 
 ```json
 {
-  "poolId": "2efc793b-661c-1760-d1ad-e51614113424",
+  "poolId": "<your-pool-id>",
   "token": "<dynamic-token>",
-  "userId": "397265",
+  "userId": "<your-tk-uid>",
   "problemId": 1993847
 }
 ```

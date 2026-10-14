@@ -1,7 +1,7 @@
 import { $, $store } from 'easy-us';
 
 export type LogType = 'log' | 'info' | 'debug' | 'warn' | 'error';
-export type LogCategory = 'system' | 'search';
+export type LogCategory = 'system' | 'search' | 'debug';
 
 export interface PanelLog {
 	type: LogType;
@@ -17,13 +17,19 @@ const MAX_LOGS = 200;
 const MAX_LOG_CONTENT_LENGTH = 1000;
 const MAX_LOG_DETAIL_LENGTH = 4000;
 
+/** 调试日志条数更多，但每条更短（调试模式下事件很密集，每次写入都要序列化整个数组） */
+const DEBUG_MAX_LOGS = 400;
+const DEBUG_MAX_LOG_CONTENT_LENGTH = 600;
+const DEBUG_MAX_LOG_DETAIL_LENGTH = 1500;
+
 function truncate(text: string, max: number) {
 	return text.length > max ? text.slice(0, max) + `…（已截断，原长度 ${text.length}）` : text;
 }
 
 export const PANEL_LOG_NAMESPACES = {
 	system: 'render.console',
-	search: 'render.search-console'
+	search: 'render.search-console',
+	debug: 'render.debug-console'
 } as const;
 
 function getLogsStoreKey(namespace: string) {
@@ -70,18 +76,24 @@ export function writePanelLog(
 	content: string,
 	detail?: unknown
 ) {
+	const isDebug = category === 'debug';
+	const maxLogs = isDebug ? DEBUG_MAX_LOGS : MAX_LOGS;
+	const maxContent = isDebug ? DEBUG_MAX_LOG_CONTENT_LENGTH : MAX_LOG_CONTENT_LENGTH;
+	const maxDetail = isDebug ? DEBUG_MAX_LOG_DETAIL_LENGTH : MAX_LOG_DETAIL_LENGTH;
+
 	let logs = getPanelLogs(namespace);
-	if (logs.length >= MAX_LOGS) {
-		logs = logs.slice(-(MAX_LOGS - 1));
+	if (logs.length >= maxLogs) {
+		logs = logs.slice(-(maxLogs - 1));
 	}
 
 	logs = logs.concat({
 		type,
 		category,
-		content: truncate(content, MAX_LOG_CONTENT_LENGTH),
+		content: truncate(content, maxContent),
 		time: Date.now(),
-		stack: getLogStack().slice(0, 600),
-		detail: detail === undefined ? undefined : truncate(stringifyLogValue(detail), MAX_LOG_DETAIL_LENGTH)
+		// 调试日志不需要调用栈（体积大且没有用处）
+		stack: isDebug ? '' : getLogStack().slice(0, 600),
+		detail: detail === undefined ? undefined : truncate(stringifyLogValue(detail), maxDetail)
 	});
 
 	$store.set(getLogsStoreKey(namespace), logs);

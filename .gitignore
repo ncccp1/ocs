@@ -137,3 +137,9 @@ dist/
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# 本地环境文件
+.DS_Store
+.claude/settings.local.json
+# 本地保存的超星页面（含会话参数，只用于本地调试，不提交）
+章节测验答题页面/

@@ -3,8 +3,13 @@ import { request } from '../utils/request';
 import { $ } from '../../utils';
 
 export const AnswerWrapperHandlerConfig = {
-	// 超时时间，单位毫秒
-	timeout_seconds: 60
+	// 单个题库的超时时间，单位秒
+	timeout_seconds: 60,
+	/**
+	 * 答题线程等待搜题结果时，在题库超时时间之外额外多等待的秒数。
+	 * AI 答题可能需要思考很久，由上层根据 AI 的最长等待时间设置，避免答案还没返回就被判定为超时。
+	 */
+	extra_wait_seconds: 0
 };
 
 /**
@@ -185,9 +190,12 @@ export async function defaultAnswerWrapperHandler(
 		if (typeof data === 'string') {
 			const matches = data.match(/\${(.*?)}/g) || [];
 			matches.forEach((placeHolder) => {
-				/** 获取占位符的值 */
-				const value: any = env[placeHolder.replace(/\${(.*)}/, '$1')];
-				data = data.replace(placeHolder, options?.encodeURI ? encodeURIComponent(value) : value);
+				/** 获取占位符的值（不存在时替换为空字符串，而不是 "undefined"） */
+				const raw: any = env[placeHolder.replace(/\${(.*)}/, '$1')];
+				const value = raw === undefined || raw === null ? '' : String(raw);
+				const text = options?.encodeURI ? encodeURIComponent(value) : value;
+				// 使用函数作为替换内容，避免题目中的 $& $$ 等被当作特殊替换模式
+				data = data.replace(placeHolder, () => text);
 			});
 		} else if (typeof data === 'object') {
 			// 递归替换

@@ -184,12 +184,16 @@ export function createQuestionTitleExtra(question: string) {
 			h('span', { className: 'question-title-extra-btn', innerText: '🌏百度一下' }, (btn) => {
 				btn.onclick = () => {
 					popupWin?.close();
-					popupWin = $.createCenteredPopupWindow(`https://www.baidu.com/s?wd=${question}`, '百度搜索', {
-						width: 1000,
-						height: 800,
-						resizable: true,
-						scrollbars: true
-					});
+					popupWin = $.createCenteredPopupWindow(
+						`https://www.baidu.com/s?wd=${encodeURIComponent(question)}`,
+						'百度搜索',
+						{
+							width: 1000,
+							height: 800,
+							resizable: true,
+							scrollbars: true
+						}
+					);
 				};
 			})
 		],

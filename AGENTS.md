@@ -31,7 +31,7 @@ Build output goes to `dist/`:
 - `nanchengpai.dev.user.js`: development userscript
 - `nanchengpai.common.user.js`: all-domain userscript with broader `@connect`
 
-`pnpm build` also writes `release/` (committed, served from `raw.githubusercontent.com/ncccp1/ocs/main/release/`): `nanchengpai[.common].user.js` plus a header-only `.meta.js`. The userscript headers carry `@updateURL` (the `.meta.js`) and `@downloadURL`, and `background.ts` `update` script polls the same `.meta.js` every 6h to show an in-page prompt. To publish: bump `package.json` version, `pnpm build`, commit `release/`, push. The `(dev)` build has no update URL.
+`pnpm build` also writes `release/` (committed, served from `raw.githubusercontent.com/ncccp1/ocs/main/release/`): `nanchengpai[.common].user.js` plus a header-only `.meta.js`. The userscript headers carry `@updateURL` (the `.meta.js`) and `@downloadURL`, and `background.ts` `update` script polls the same `.meta.js` every 1h (also on a timer in long-lived tabs) to show an in-page prompt. To publish: bump `package.json` version, `pnpm build`, commit `release/`, push. The `(dev)` build has no update URL.
 
 ## Architecture
 
@@ -56,6 +56,13 @@ Dependency flow: `packages/utils` -> `packages/core` -> `packages/scripts`
 
 - Prefer `searchAnswerInWrappers()` / `searchQuestionsInWrappers()` from `packages/scripts/src/utils/answerer.ts` for script-side search flows.
 - `MeTo` is configured in `通用 -> 全局设置`; it is a direct remote integration and does not require a localhost proxy or extra local service.
+- Search timing: `searchAnswerInWrappers()` queries all wrappers **in parallel**, each guarded by `searchWrapperWithDeadline()` (`AnswerWrapperHandlerConfig.timeout_seconds`; MeTo requests also have a per-attempt timeout). AI requests are **streamed** (`postChatStream()`, SSE merged back into the non-stream shape): `aiMaxWait` (default 600s) is the per-question budget covering thinking, web search and retries, and the idle watchdog only fires after data has been seen. `syncAiWaitConfig()` sets `AnswerWrapperHandlerConfig.extra_wait_seconds` so the core worker (`waitForRequested`) never gives up before the AI budget — keep these in sync when touching timeouts.
+- MeTo has **no built-in account**: `DEFAULT_METO_AUTH_CONFIG` credentials are empty on purpose and must not be hardcoded again; users fill `tk_uid/poolId` (tutorial: `showMetoGuide()` in `common.ts` and `MeTo题库API文档.md`).
+- Question cache lookups go through an in-memory index (`getQuestionCacheIndex()` in `common.ts`); call `invalidateQuestionCacheIndex()` after any direct write to `localQuestionCaches`.
+- Debug mode (`utils/debug.ts`, `utils/snapshot.ts`): switch and dry-run live in `后台 -> 开发者调试` (`background.dev.debugEnabled/dryRun`). Use `$debug.log(module, msg, detail)` to record decisions (no-op when off), call `skipInDryRun(action)` right before any submit/save/auto-jump, and register state worth exporting with `registerSnapshotCollector(name, fn)`. The page snapshot export asks every iframe (through GM store keys `ncp.snapshot.*`) for its own document and redacts enc/token/uid-style params; output is a JSON file with all frames, redacted settings and recent logs.
+- Floating control bar: every auto-answer flow (homework, exam, chapter test) calls `attachWorkFloatingBar(worker)` (`utils/work.ts`); pause state is shared by the bar and the panel button through `setWorkPaused()/isWorkPaused()`. The bar is mounted on the top document so it also works from the chapter-test iframe.
+- 超星考试 auto retake (`chapterTest-autoRetake`) is **work-only by default**; exams need `chapterTest-autoRetake-exam` plus a confirmation dialog (`confirmExamRetake()`), because an exam can usually be submitted only once.
+- Release flow: bump `package.json` version, `pnpm build` (writes `dist/` and the committed `release/` consumed by `@updateURL`/`@downloadURL` and the in-script update prompt), commit `release/`, push (see `scripts/release.sh`).
 - Search-related diagnostics go to `后台 -> 搜题日志`; system-level messages stay in the normal console panel.
 - Manual search UI is embedded in `通用 -> 搜索结果`.
 - For 超星章节测试, “达到阈值自动提交” and “未达到阈值自动保存” are both expected behaviors.

@@ -19,12 +19,15 @@ import { RenderScript } from '../render';
 import { SearchInfosElement } from '../elements/search.infos';
 import { $render } from '../utils/render';
 import { clearPanelLogs, createPanelLogger, LogType, PANEL_LOG_NAMESPACES, PanelLog } from '../utils/logger';
+import { $debug, isDebugEnabled, isDryRun } from '../utils/debug';
+import { exportDebugLogs, exportPageSnapshot, installSnapshotResponder } from '../utils/snapshot';
 
 const state = {
 	console: {
 		listenerIds: {
 			logs: 0 as StoreListenerType,
-			searchLogs: 0 as StoreListenerType
+			searchLogs: 0 as StoreListenerType,
+			debugLogs: 0 as StoreListenerType
 		}
 	},
 	app: {
@@ -38,8 +41,8 @@ const state = {
 
 /** 发布文件所在目录（脚本管理器的自动更新与脚本内的更新提示都读取这里） */
 const RELEASE_BASE_URL = 'https://raw.githubusercontent.com/ncccp1/ocs/main/release/';
-/** 两次检查更新的最小间隔：6 小时 */
-const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+/** 检查更新的间隔：1 小时 */
+const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000;
 
 /** 比较版本号，remote 比 local 新时返回 true */
 function isNewerVersion(remote: string, local: string) {
@@ -69,12 +72,13 @@ type RequestList = {
 const getTypeDesc = (type: LogType) =>
 	type === 'info' ? '信息' : type === 'error' ? '错误' : type === 'warn' ? '警告' : type === 'debug' ? '调试' : '日志';
 
-const getCategoryDesc = (category?: PanelLog['category']) => (category === 'search' ? '搜题' : '系统');
+const getCategoryDesc = (category?: PanelLog['category']) =>
+	category === 'search' ? '搜题' : category === 'debug' ? '调试' : '系统';
 
 function renderLogPanel(
 	script: Script,
 	panel: { body: HTMLElement },
-	listenerRef: 'logs' | 'searchLogs',
+	listenerRef: 'logs' | 'searchLogs' | 'debugLogs',
 	namespace: string,
 	title: string
 ) {
@@ -213,6 +217,35 @@ export const BackgroundProject = Project.create({
 			},
 			onrender({ panel }) {
 				renderLogPanel(this, panel, 'searchLogs', PANEL_LOG_NAMESPACES.search, '搜题日志');
+			}
+		}),
+		debugConsole: new Script({
+			name: '🐞 调试日志',
+			matches: [['所有', /.*/]],
+			namespace: 'render.debug-console',
+			configs: {
+				notes: {
+					defaultValue: $ui.notes([
+						'调试日志：记录脚本“为什么这样做/为什么没做”，用于排查问题和开发新功能。',
+						'需要先在 后台 -> 开发者调试 中开启“调试模式”，关闭时不会产生任何记录。',
+						'日志可在 后台 -> 开发者调试 中导出，连同页面元素快照一起发给开发者即可。'
+					]).outerHTML
+				},
+				logs: {
+					defaultValue: [] as PanelLog[]
+				}
+			},
+			onrender({ panel }) {
+				renderLogPanel(this, panel, 'debugLogs', PANEL_LOG_NAMESPACES.debug, '调试日志');
+			}
+		}),
+		debugResponder: new Script({
+			name: '🐞 页面快照响应器',
+			hideInPanel: true,
+			matches: [['所有页面', /.*/]],
+			onstart() {
+				// 每一层页面（包括 iframe）都要响应“导出页面元素”的请求
+				installSnapshotResponder();
 			}
 		}),
 		appConfigSync: new Script({
@@ -438,12 +471,12 @@ export const BackgroundProject = Project.create({
 			namespace: 'background.update',
 			configs: {
 				notes: {
-					defaultValue: '脚本自动更新模块，如果有新的版本会自动通知。'
+					defaultValue: '脚本每 1 小时自动检查一次更新，发现新版本时会在页面上提醒；也可以在下方手动检查。'
 				},
 				autoNotify: {
 					defaultValue: true,
 					label: '开启更新通知',
-					attrs: { type: 'checkbox', title: '当有最新的版本时自动弹窗通知，默认开启' }
+					attrs: { type: 'checkbox', title: '当有最新的版本时在页面上提醒，默认开启' }
 				},
 				notToday: {
 					defaultValue: -1
@@ -451,9 +484,13 @@ export const BackgroundProject = Project.create({
 				ignoreVersions: {
 					defaultValue: [] as string[]
 				},
-				/** 上一次检查更新的时间戳，避免每次打开页面都请求 */
+				/** 上一次检查更新的时间戳，避免频繁换页时重复请求 */
 				lastCheck: {
 					defaultValue: 0
+				},
+				/** 已经发送过系统通知的版本，避免每小时重复通知同一个版本 */
+				notifiedVersion: {
+					defaultValue: ''
 				}
 			},
 			methods() {
@@ -461,59 +498,199 @@ export const BackgroundProject = Project.create({
 				const releaseName = () =>
 					($gm.getInfos()?.script?.name || '').includes('全域名通用版') ? 'nanchengpai.common' : 'nanchengpai';
 
-				return {
-					getDownloadUrl: () => RELEASE_BASE_URL + releaseName() + '.user.js',
-					getLastVersion: async () => {
-						let version = '';
-						try {
-							// 读取的是脚本管理器自动更新用的同一个元数据文件，保证提示的版本一定可以下载到
-							const meta = (await request(RELEASE_BASE_URL + releaseName() + '.meta.js?t=' + Date.now(), {
-								method: 'get',
-								type: 'GM_xmlhttpRequest',
-								responseType: 'text'
-							})) as string;
-							version = String(meta).match(/@version\s+([0-9][0-9.]*)/)?.[1] || '';
-						} catch (e) {
-							console.warn('[update] 读取最新版本失败', e);
-						}
-						return {
-							'last-version': version || 'unknown',
-							resource: {},
-							notes: []
-						} as { 'last-version': string; resource: Record<string, string>; notes: string[] };
+				type UpdateResult = { status: 'latest' | 'new' | 'error'; last: string; current: string; checkedAt: number };
+				let lastResult: UpdateResult | undefined;
+				let promptMessage: MessageElement | undefined;
+
+				const getDownloadUrl = () => RELEASE_BASE_URL + releaseName() + '.user.js';
+
+				const getLastVersion = async () => {
+					let version = '';
+					try {
+						// 读取的是脚本管理器自动更新用的同一个元数据文件，保证提示的版本一定可以下载到
+						const meta = (await request(RELEASE_BASE_URL + releaseName() + '.meta.js?t=' + Date.now(), {
+							method: 'get',
+							type: 'GM_xmlhttpRequest',
+							responseType: 'text'
+						})) as string;
+						version = String(meta).match(/@version\s+([0-9][0-9.]*)/)?.[1] || '';
+					} catch (e) {
+						console.warn('[update] 读取最新版本失败', e);
 					}
+					return {
+						'last-version': version || 'unknown',
+						resource: {},
+						notes: []
+					} as { 'last-version': string; resource: Record<string, string>; notes: string[] };
+				};
+
+				/** 在页面上提醒有新版本（使用不会遮挡页面的消息，避免打断正在运行的自动答题） */
+				const showPrompt = (last: string, current: string) => {
+					if (promptMessage?.isConnected) {
+						return;
+					}
+
+					const today = Math.floor(Date.now() / 86400000);
+					const button = (text: string, primary: boolean, onClick: () => void) => {
+						const btn = h('button', { className: primary ? 'base-style-button' : 'base-style-button-secondary' }, text);
+						btn.style.marginRight = '8px';
+						btn.onclick = onClick;
+						return btn;
+					};
+
+					promptMessage = $message.info({
+						duration: 0,
+						content: h('div', { style: { lineHeight: '1.8' } }, [
+							h('div', [h('b', `发现新版本 ${last}`), `（当前 ${current}）`]),
+							h(
+								'div',
+								{ style: { fontSize: '12px', opacity: '0.8' } },
+								'点击“立即更新”，在脚本管理器打开的页面里确认安装即可。'
+							),
+							h('div', { style: { marginTop: '6px' } }, [
+								button('立即更新', true, () => {
+									window.open(getDownloadUrl(), '_blank');
+									promptMessage?.remove();
+								}),
+								button('更新日志', false, () => CommonProject.scripts.apps.methods.showChangelog()),
+								button('今天不再提示', false, () => {
+									this.cfg.notToday = today;
+									promptMessage?.remove();
+								}),
+								button('忽略此版本', false, () => {
+									this.cfg.ignoreVersions = [...this.cfg.ignoreVersions, last];
+									promptMessage?.remove();
+								})
+							])
+						])
+					});
+				};
+
+				/**
+				 * 检查更新。
+				 * manual 为 true 时（用户在面板里点击检查）只返回结果，不弹出提醒，也不受“今天不再提示”影响。
+				 */
+				const check = async (manual = false): Promise<UpdateResult> => {
+					const infos = $gm.getInfos();
+					const current = infos?.script?.version || '';
+					const last = (await getLastVersion())['last-version'];
+					const now = Date.now();
+					this.cfg.lastCheck = now;
+
+					const status: UpdateResult['status'] =
+						last === 'unknown' ? 'error' : isNewerVersion(last, current) ? 'new' : 'latest';
+					lastResult = { status, last, current, checkedAt: now };
+					$debug.log('update', '检查更新', lastResult);
+
+					if (!manual && status === 'new' && this.cfg.autoNotify) {
+						const today = Math.floor(now / 86400000);
+						if (!this.cfg.ignoreVersions.includes(last) && this.cfg.notToday !== today) {
+							showPrompt(last, current);
+							// 系统通知每个版本只发一次，之后每小时的检查只更新页面上的提醒
+							if (this.cfg.notifiedVersion !== last) {
+								this.cfg.notifiedVersion = last;
+								CommonProject.scripts.settings.methods.notificationBySetting(
+									`南城派网课助手有新版本 ${last}，当前 ${current}`,
+									{ extraTitle: '南城派网课助手' }
+								);
+							}
+						}
+					}
+
+					return lastResult;
+				};
+
+				return {
+					getDownloadUrl,
+					getLastVersion,
+					check,
+					getLastResult: () => lastResult
 				};
 			},
-			async onrender({ panel }) {
-				const version = await this.methods.getLastVersion();
+			onrender({ panel }) {
 				const infos = $gm.getInfos();
-
 				if (!infos) {
 					return;
 				}
 
-				const changeLog = h('button', { className: 'base-style-button-secondary' }, '📄查看更新日志');
+				const current = infos.script.version;
+				const updateUrl = this.methods.getDownloadUrl();
+
+				const statusEl = h('span', { style: { fontWeight: 'bold' } }, '检查中...');
+				const latestEl = h('span', '...');
+				const timeEl = h('div', { style: { fontSize: '12px', opacity: '0.75', marginTop: '4px' } }, '');
+				const checkBtn = h('button', { className: 'base-style-button' }, '🔄 立即检查更新') as HTMLButtonElement;
+				const installBtn = h('button', { className: 'base-style-button' }, '⬇️ 立即更新') as HTMLButtonElement;
+				installBtn.style.display = 'none';
+				installBtn.style.marginLeft = '8px';
+				installBtn.onclick = () => window.open(updateUrl, '_blank');
+
+				const changeLog = h('button', { className: 'base-style-button-secondary' }, '📄 更新日志') as HTMLButtonElement;
+				changeLog.style.marginLeft = '8px';
 				changeLog.onclick = () => CommonProject.scripts.apps.methods.showChangelog();
-				const updatePage = this.methods.getDownloadUrl();
+
+				const showResult = (result: { status: string; last: string; checkedAt: number }) => {
+					latestEl.textContent = result.last === 'unknown' ? '未知' : result.last;
+					if (result.status === 'new') {
+						statusEl.textContent = '🆕 发现新版本';
+						statusEl.style.color = '#e67e22';
+					} else if (result.status === 'latest') {
+						statusEl.textContent = '✅ 已是最新版本';
+						statusEl.style.color = '#2e9e5b';
+					} else {
+						statusEl.textContent = '⚠️ 检查失败（可能无法访问 GitHub，请稍后重试）';
+						statusEl.style.color = '#d9534f';
+					}
+					installBtn.style.display = result.status === 'new' ? 'inline-block' : 'none';
+					timeEl.textContent = '上次检查：' + new Date(result.checkedAt).toLocaleTimeString();
+				};
+
+				const runCheck = async () => {
+					checkBtn.disabled = true;
+					checkBtn.textContent = '检查中...';
+					statusEl.textContent = '检查中...';
+					statusEl.style.color = '';
+					try {
+						showResult(await this.methods.check(true));
+					} finally {
+						checkBtn.disabled = false;
+						checkBtn.textContent = '🔄 立即检查更新';
+					}
+				};
+				checkBtn.onclick = runCheck;
+
 				panel.body.replaceChildren(
 					h('div', { className: 'card' }, [
+						h('div', { style: { lineHeight: '1.9' } }, [
+							h('div', ['当前版本：', h('b', current)]),
+							h('div', ['最新版本：', latestEl]),
+							h('div', ['状态：', statusEl]),
+							timeEl
+						]),
+						h('div', { style: { margin: '10px 0' } }, [checkBtn, installBtn, changeLog]),
 						h('hr'),
-						h('div', ['最新版本：' + version['last-version'] + ' - ', changeLog]),
-						h('hr'),
-						h('div', '当前版本：' + infos.script.version),
-						h('div', '脚本管理器：' + infos.scriptHandler),
-						h('div', ['脚本更新链接：', h('a', { target: '_blank', href: updatePage }, [updatePage || '无'])])
+						h('div', { style: { fontSize: '12px', opacity: '0.8', lineHeight: '1.7' } }, [
+							h('div', `脚本管理器：${infos.scriptHandler}`),
+							h('div', ['更新地址：', h('a', { target: '_blank', href: updateUrl }, updateUrl)]),
+							h(
+								'div',
+								'脚本会每 1 小时自动检查一次；脚本管理器（Tampermonkey、脚本猫等）也有自己的更新检查周期，可在其设置中调整。'
+							)
+						])
 					])
 				);
-				console.log('versions', {
-					notToday: this.cfg.notToday,
-					ignoreVersions: this.cfg.ignoreVersions,
-					version: version
-				});
+
+				// 打开面板时展示上一次的结果，没有结果再检查一次
+				const previous = this.methods.getLastResult();
+				if (previous) {
+					showResult(previous);
+				} else {
+					runCheck();
+				}
 			},
 			async oncomplete() {
-				// 只在顶层页面检查，避免页面内的 iframe 重复弹窗
-				if (window.top !== window || !this.cfg.autoNotify) {
+				// 只在顶层页面检查，避免页面内的 iframe 重复提醒
+				if (window.top !== window) {
 					return;
 				}
 				const infos = $gm.getInfos();
@@ -522,50 +699,23 @@ export const BackgroundProject = Project.create({
 					return;
 				}
 
-				const now = Date.now();
-				if (now - (this.cfg.lastCheck || 0) < UPDATE_CHECK_INTERVAL) {
-					return;
-				}
-				this.cfg.lastCheck = now;
-
-				const last = (await this.methods.getLastVersion())['last-version'];
-				const current = infos.script.version;
-				if (last === 'unknown' || !isNewerVersion(last, current)) {
-					return;
-				}
-
-				const today = Math.floor(now / 86400000);
-				if (this.cfg.ignoreVersions.includes(last) || this.cfg.notToday === today) {
-					return;
-				}
-
-				const url = this.methods.getDownloadUrl();
-				const ignoreLink = h('a', { style: { cursor: 'pointer' } }, '忽略此版本');
-				const modal = $modal.confirm({
-					content: h('div', [
-						h('div', `发现新版本 ${last}（当前 ${current}）。`),
-						h('div', { style: { margin: '8px 0' } }, '点击“立即更新”后，在脚本管理器的安装页面确认即可。'),
-						ignoreLink
-					]),
-					confirmButtonText: '立即更新',
-					cancelButtonText: '今天不再提示',
-					onConfirm: () => {
-						window.open(url, '_blank');
-					},
-					onCancel: () => {
-						this.cfg.notToday = today;
+				const run = async () => {
+					if (!this.cfg.autoNotify) {
+						return;
 					}
-				});
-				ignoreLink.onclick = () => {
-					this.cfg.ignoreVersions = [...this.cfg.ignoreVersions, last];
-					modal?.remove();
+					try {
+						await this.methods.check(false);
+					} catch (error) {
+						console.warn('[update] 检查更新出错', error);
+					}
 				};
-				CommonProject.scripts.settings.methods.notificationBySetting(
-					`南城派网课助手有新版本 ${last}，当前 ${current}`,
-					{
-						extraTitle: '南城派网课助手'
-					}
-				);
+
+				// 页面加载时检查；频繁换页（例如章节自动跳转）时，1 小时内只请求一次
+				if (Date.now() - (this.cfg.lastCheck || 0) >= UPDATE_CHECK_INTERVAL) {
+					run();
+				}
+				// 页面长时间不刷新（例如一直在刷课）时，每小时再检查一次
+				setInterval(run, UPDATE_CHECK_INTERVAL);
 			}
 		}),
 		dev: new Script({
@@ -574,7 +724,25 @@ export const BackgroundProject = Project.create({
 			matches: [['所有页面', /./]],
 			configs: {
 				notes: {
-					defaultValue: '开发人员调试用。<br>注入 NCP_CONTEXT（同时兼容 OCS_CONTEXT）全局变量。用户可忽略此页面。'
+					defaultValue: $ui.notes([
+						'开发人员调试用，用户可忽略此页面。',
+						'开启“调试模式”后，脚本会把关键决策（任务点为什么被跳过、跳转走了哪个分支、缓存命中情况等）记录到 后台 -> 调试日志。',
+						'“试运行”：照常搜题、答题和记录日志，但不会提交、不会保存、不会自动跳转章节，适合在真实页面上验证流程。',
+						'遇到“卡住”“找不到元素”等问题时，点击下方“导出页面元素”，把下载的文件发给开发者。'
+					]).outerHTML
+				},
+				debugEnabled: {
+					label: '开启调试模式',
+					defaultValue: false,
+					attrs: { type: 'checkbox', title: '记录详细的调试日志（后台 -> 调试日志），并在浏览器控制台输出，默认关闭。' }
+				},
+				dryRun: {
+					label: '试运行（不提交/不保存/不跳转）',
+					defaultValue: false,
+					attrs: {
+						type: 'checkbox',
+						title: '开启后脚本会照常搜题、填写答案，但不会提交、保存，也不会自动跳转到下一个章节/小节。'
+					}
 				},
 				show_debug_cursor: {
 					defaultValue: true,
@@ -612,7 +780,80 @@ export const BackgroundProject = Project.create({
 					});
 				});
 
-				panel.body.replaceChildren(h('div', { className: 'card' }, [h('hr'), injectBtn, showTabDataBtn]));
+				const runExport = async (mode: 'structure' | 'full', button: HTMLButtonElement) => {
+					const text = button.textContent;
+					button.disabled = true;
+					button.textContent = '导出中...';
+					try {
+						const result = await exportPageSnapshot(mode);
+						const kb = Math.round(result.size / 1024);
+						$message.success({
+							content: `已导出 ${result.filename}（${result.frameCount} 层页面，${kb} KB）${
+								result.truncated ? '，部分页面过大已截断' : ''
+							}`,
+							duration: 8
+						});
+					} catch (error) {
+						$message.error({ content: '导出页面元素失败：' + String(error) });
+					} finally {
+						button.disabled = false;
+						button.textContent = text;
+					}
+				};
+
+				const structureBtn = h(
+					'button',
+					{ className: 'base-style-button' },
+					'导出页面元素（推荐）'
+				) as HTMLButtonElement;
+				structureBtn.title = '导出所有层级页面的结构，文本只保留前 40 个字符，已隐藏账号相关参数';
+				structureBtn.onclick = () => runExport('structure', structureBtn);
+
+				const fullBtn = h('button', { className: 'base-style-button-secondary' }, '导出完整HTML') as HTMLButtonElement;
+				fullBtn.title = '保留完整文本，可能包含姓名、学校等个人信息，发送前请自行检查';
+				fullBtn.onclick = () => runExport('full', fullBtn);
+
+				const logsBtn = h('button', { className: 'base-style-button-secondary' }, '导出日志') as HTMLButtonElement;
+				logsBtn.onclick = () => {
+					const result = exportDebugLogs();
+					$message.success({ content: `已导出 ${result.filename}`, duration: 5 });
+				};
+
+				const clearDebugBtn = h(
+					'button',
+					{ className: 'base-style-button-secondary' },
+					'清空调试日志'
+				) as HTMLButtonElement;
+				clearDebugBtn.onclick = () => {
+					clearPanelLogs(PANEL_LOG_NAMESPACES.debug);
+					$message.success({ content: '调试日志已清空', duration: 3 });
+				};
+
+				const status = h(
+					'div',
+					{ style: { margin: '8px 0', fontSize: '12px', opacity: '0.8' } },
+					`当前状态：调试模式${isDebugEnabled() ? '已开启' : '未开启'}，试运行${isDryRun() ? '已开启' : '未开启'}`
+				);
+
+				const row = (...buttons: HTMLElement[]) =>
+					h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '8px 0' } }, buttons);
+
+				panel.body.replaceChildren(
+					h('div', { className: 'card' }, [
+						status,
+						h('b', '页面元素'),
+						row(structureBtn, fullBtn),
+						h('b', '日志'),
+						row(logsBtn, clearDebugBtn),
+						h('b', '其他'),
+						row(injectBtn, showTabDataBtn)
+					])
+				);
+			},
+			oncomplete() {
+				if (isDebugEnabled()) {
+					$debug.log('debug', '调试模式已开启', { dryRun: isDryRun(), url: window.location.href });
+				}
 			}
 		}),
 		appLoginHelper: new Script({
@@ -1040,6 +1281,10 @@ export const BackgroundProject = Project.create({
 				await $menu('📥', { scriptPanelLink: BackgroundProject.scripts.update });
 				await $menu('📄', { scriptPanelLink: BackgroundProject.scripts.console });
 				await $menu('🧾', { scriptPanelLink: BackgroundProject.scripts.searchConsole });
+				// 调试模式开启时，提供调试日志的快捷入口
+				if (isDebugEnabled()) {
+					await $menu('🐞', { scriptPanelLink: BackgroundProject.scripts.debugConsole });
+				}
 			}
 		})
 	}

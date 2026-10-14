@@ -1,4 +1,5 @@
 import { $ui, Project, Script, $el, h, $$el, $message, $, $modal, MessageElement, $store, $gm } from 'easy-us';
+import { isDebugEnabled } from '../utils/debug';
 import { RemotePage, SimplifyWorkResult, OCSWorker } from '@ocsjs/core';
 import { CommonProject } from './common';
 import { searchAnswerInWrappers } from '../utils/answerer';
@@ -1283,6 +1284,7 @@ export const ZHSProject = Project.create({
 							}
 
 							playMedia(() => video?.play()).then(() => {
+								$store.setTab('reload-count', 0);
 								const cn = getChapterName();
 								$message.info({ content: '正在学习：' + cn });
 								$console.log('正在学习：' + cn);
@@ -1792,6 +1794,8 @@ export const ZHSProject = Project.create({
 					}, 3000);
 
 					playMedia(() => video?.play()).then(() => {
+						// 视频成功开始播放，清零重新加载计数，避免累计几次偶发失败后误报“超过 3 次”
+						$store.setTab('reload-count', 0);
 						const current = document.querySelector<HTMLElement>(
 							'.chapter-item.current , .chapter-content-second.current'
 						);
@@ -2015,6 +2019,7 @@ export const ZHSProject = Project.create({
 					}, 3000);
 
 					playMedia(() => video?.play()).then(() => {
+						$store.setTab('reload-count', 0);
 						const cn = getChapterName();
 						$message.info({ content: '正在学习：' + cn });
 						$console.log('正在学习：' + cn);
@@ -2135,7 +2140,9 @@ async function watch(
 			}
 			return state.study.currentMedia;
 		} catch (e) {
-			return await reload(e);
+			// 这里只记录错误，由调用方统一处理重新加载，避免同一次失败触发两次刷新并重复计数
+			$console.error(e);
+			return undefined;
 		}
 	};
 
@@ -2172,7 +2179,9 @@ async function watch(
 		}
 	}, 3000);
 
-	playMedia(() => video?.play());
+	playMedia(() => video?.play()).then(() => {
+		$store.setTab('reload-count', 0);
+	});
 
 	video.onpause = async () => {
 		if (!video?.ended && state.study.stop === false) {
@@ -2726,7 +2735,7 @@ function smartWork(
 		}
 		let count = 0;
 		while (worker.isClose === false) {
-			await worker.doWork({ enable_debug: true });
+			await worker.doWork({ enable_debug: isDebugEnabled() });
 			next = getNextBtn();
 			if (!next) {
 				break;
@@ -3000,7 +3009,7 @@ function hikeWork(
 		}
 
 		while (next && worker.isClose === false) {
-			await worker.doWork({ enable_debug: true });
+			await worker.doWork({ enable_debug: isDebugEnabled() });
 			next = getNextBtn();
 			if (next) {
 				await $.sleep(1000);

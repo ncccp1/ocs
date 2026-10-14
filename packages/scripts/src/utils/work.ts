@@ -7,6 +7,40 @@ import { searchAnswerInWrappers } from './answerer';
 export let globalControlPanel: HTMLElement | null = null;
 let globalFloatingBar: HTMLElement | null = null;
 
+const FLOATING_BAR_ID = 'ncp-floating-bar';
+
+/** 悬浮条要挂载到顶层页面：章节测验在 iframe 里运行，挂在 iframe 内会被裁剪得很小 */
+function getFloatingBarHost(): Document {
+	try {
+		if (window.top && window.top.document) {
+			return window.top.document;
+		}
+	} catch {
+		// 顶层页面是跨域的，只能挂载在当前页面
+	}
+	return document;
+}
+
+/**
+ * 暂停状态由答题器统一保存，面板里的按钮和悬浮条共用同一份，
+ * 任何一个按钮切换后，另一个都会同步更新，不会出现“一个显示暂停、另一个显示继续”的情况。
+ */
+const pausedWorkers = new WeakMap<object, boolean>();
+const pauseListeners = new Set<(worker: object, paused: boolean) => void>();
+
+export function isWorkPaused(worker: object | undefined) {
+	return worker ? pausedWorkers.get(worker) === true : false;
+}
+
+export function setWorkPaused(worker: CommonEventEmitter<WorkerEvents> | undefined, paused: boolean) {
+	if (!worker) {
+		return;
+	}
+	pausedWorkers.set(worker, paused);
+	worker.emit?.(paused ? 'stop' : 'continuate');
+	pauseListeners.forEach((listener) => listener(worker, paused));
+}
+
 const floatingBtnStyle: Partial<CSSStyleDeclaration> = {
 	padding: '6px 14px',
 	border: 'none',
@@ -22,6 +56,7 @@ const floatingBtnStyle: Partial<CSSStyleDeclaration> = {
  */
 function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 	if (globalFloatingBar) globalFloatingBar.remove();
+	getFloatingBarHost().getElementById(FLOATING_BAR_ID)?.remove();
 
 	// --- 开始/暂停按钮 ---
 	const pauseBtn = h('button', { style: { ...floatingBtnStyle, background: '#7c4dff' } }, '⏸ 暂停');
@@ -116,7 +151,7 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 			);
 		} catch (e: any) {
 			searchResultBox.style.display = 'block';
-			searchResultBox.innerHTML = `<span style="color:#ff7b72">搜索失败: ${e?.message || e}</span>`;
+			searchResultBox.replaceChildren(h('span', { style: { color: '#ff7b72' } }, `搜索失败: ${e?.message || e}`));
 		}
 		searchBtn.textContent = '搜索';
 		searchBtn.removeAttribute('disabled');
@@ -148,10 +183,45 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 		closeResultBtn.style.display = searchResultBox.style.display === 'none' ? 'none' : 'inline-block';
 	}).observe(searchResultBox, { attributes: true, attributeFilter: ['style'] });
 
+	// --- 折叠按钮：只保留“暂停/继续”，避免控制条遮挡页面上的按钮（折叠状态会被记住） ---
+	const COLLAPSE_KEY = 'ncp_floating_bar_collapsed';
+	const collapseBtn = h(
+		'button',
+		{ style: { ...floatingBtnStyle, background: '#555', padding: '4px 8px', fontSize: '11px' } },
+		''
+	);
+	const applyCollapsed = (collapsed: boolean) => {
+		[searchInput, searchBtn].forEach((el) => {
+			el.style.display = collapsed ? 'none' : '';
+		});
+		if (collapsed) {
+			searchResultBox.style.display = 'none';
+		}
+		collapseBtn.textContent = collapsed ? '▸' : '▾';
+		collapseBtn.title = collapsed ? '展开手动搜题' : '折叠，只保留暂停/继续';
+	};
+	let collapsed = false;
+	try {
+		collapsed = localStorage.getItem(COLLAPSE_KEY) === '1';
+	} catch {
+		// 无法读取本地存储时使用默认展开状态
+	}
+	applyCollapsed(collapsed);
+	collapseBtn.onclick = () => {
+		collapsed = !collapsed;
+		try {
+			localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+		} catch {
+			// 保存失败只影响下次是否记住折叠状态
+		}
+		applyCollapsed(collapsed);
+	};
+
 	// --- 整体布局 ---
 	const bar = h(
 		'div',
 		{
+			id: FLOATING_BAR_ID,
 			style: {
 				position: 'fixed',
 				bottom: '12px',
@@ -171,6 +241,7 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 		[
 			h('span', { style: { color: '#aaa', fontSize: '11px', marginRight: '2px', fontWeight: 'bold' } }, '南城派'),
 			pauseBtn,
+			collapseBtn,
 			searchInput,
 			searchBtn,
 			closeResultBtn,
@@ -179,8 +250,54 @@ function createFloatingBar(onStartPause: () => void, getState: () => boolean) {
 	);
 
 	globalFloatingBar = bar;
-	document.body.appendChild(bar);
+	const host = getFloatingBarHost();
+	(host.body || document.body).appendChild(bar);
 	return { bar, btn: pauseBtn };
+}
+
+/**
+ * 为一个答题器挂载悬浮控制条（暂停/继续 + 手动搜题）。
+ * 作业、考试、章节测验等所有自动答题的场景都应当调用它，保证体验一致。
+ * 答题器触发 done 事件后控制条显示“完成”，几秒后自动移除。
+ */
+export function attachWorkFloatingBar(worker: CommonEventEmitter<WorkerEvents> | undefined) {
+	if (!worker) {
+		return undefined;
+	}
+
+	const control = createFloatingBar(
+		() => setWorkPaused(worker, !isWorkPaused(worker)),
+		() => isWorkPaused(worker)
+	);
+
+	let finished = false;
+	const listener = (target: object, paused: boolean) => {
+		if (target === worker && !finished) {
+			control.btn.textContent = paused ? '▶ 继续' : '⏸ 暂停';
+		}
+	};
+	pauseListeners.add(listener);
+
+	const remove = () => {
+		pauseListeners.delete(listener);
+		control.bar.remove();
+		if (globalFloatingBar === control.bar) {
+			globalFloatingBar = null;
+		}
+	};
+
+	worker.once('done', () => {
+		finished = true;
+		control.btn.textContent = '✓ 完成';
+		control.btn.style.background = '#4caf50';
+		control.btn.onclick = null;
+		setTimeout(remove, 5000);
+	});
+
+	// 页面（例如章节测验所在的 iframe）被切换走后，事件处理函数已经失效，控制条也要一起移除
+	window.addEventListener('pagehide', remove);
+
+	return control;
 }
 
 /**
@@ -313,25 +430,13 @@ export function commonWork(
 		// 更新状态
 		script.panel?.body?.replaceChildren(container, workResultPanel());
 
-		// 创建悬浮控制条
-		let paused = false;
-		const floatingCtrl = createFloatingBar(
-			() => {
-				paused = !paused;
-				worker?.emit?.(paused ? 'stop' : 'continuate');
-				controlBtn.value = paused ? '▶️继续' : '⏸️暂停';
-			},
-			() => paused
-		);
+		// 悬浮控制条（与面板里的暂停按钮共用同一个暂停状态）
+		attachWorkFloatingBar(worker);
 
 		worker?.once('done', () => {
 			running = false;
 			globalControlPanel = null;
 			controlBtn.disabled = true;
-			floatingCtrl.btn.textContent = '✓ 完成';
-			floatingCtrl.btn.style.background = '#4caf50';
-			floatingCtrl.btn.onclick = null;
-			setTimeout(() => floatingCtrl.bar.remove(), 5000);
 		});
 	};
 }
@@ -344,11 +449,26 @@ export function createWorkerControl(options: {
 	onStart: () => void;
 	onRestart: () => void;
 }) {
-	let stop = false;
 	let stopMessage: MessageElement | undefined;
 	const startBtn = $ui.button('▶️开始答题');
 	const restartBtn = $ui.button('🔃重新答题');
 	const controlBtn = $ui.button('⏸暂停');
+
+	// 悬浮条或其他地方切换了暂停状态时，同步面板按钮的显示
+	const syncState = (worker: object, paused: boolean) => {
+		if (worker !== options.workerProvider()) {
+			return;
+		}
+		controlBtn.value = paused ? '▶️继续' : '⏸️暂停';
+		if (paused) {
+			if (!stopMessage?.isConnected) {
+				stopMessage = $message.warn({ duration: 0, content: '暂停中...' });
+			}
+		} else {
+			stopMessage?.remove();
+		}
+	};
+	pauseListeners.add(syncState);
 
 	startBtn.onclick = () => {
 		startBtn.remove();
@@ -357,18 +477,16 @@ export function createWorkerControl(options: {
 	restartBtn.onclick = () => {
 		// 重新答题时，清除暂停提示
 		stopMessage?.remove();
+		const worker = options.workerProvider();
+		if (worker) {
+			pausedWorkers.set(worker, false);
+		}
 		options.onRestart();
 	};
 	controlBtn.onclick = () => {
-		stop = !stop;
 		const worker = options.workerProvider();
-		worker?.emit?.(stop ? 'stop' : 'continuate');
-		controlBtn.value = stop ? '▶️继续' : '⏸️暂停';
-		if (stop) {
-			stopMessage = $message.warn({ duration: 0, content: '暂停中...' });
-		} else {
-			stopMessage?.remove();
-		}
+		// 状态更新与按钮显示由 syncState 统一处理
+		setWorkPaused(worker, !isWorkPaused(worker));
 	};
 
 	return { startBtn, restartBtn, controlBtn };

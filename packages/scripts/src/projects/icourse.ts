@@ -1,5 +1,6 @@
 import { $, OCSWorker, RemotePage } from '@ocsjs/core';
 import { $message, Project, Script, $ui, $store } from 'easy-us';
+import { isDebugEnabled } from '../utils/debug';
 import { CommonWorkOptions, playMedia } from '../utils';
 import { searchAnswerInWrappers } from '../utils/answerer';
 import { CommonProject } from './common';
@@ -577,7 +578,7 @@ function workAndExam(
 	});
 
 	worker
-		.doWork({ enable_debug: true })
+		.doWork({ enable_debug: isDebugEnabled() })
 		.then(async (results) => {
 			if (worker.isClose) {
 				return;
