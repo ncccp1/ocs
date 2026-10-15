@@ -436,10 +436,14 @@ export async function postChatStream(
 			let sawProgress = false;
 			/** 收到过真正的 SSE 数据帧（data: ...）；排队中的请求只会收到 keep-alive，不算有进展 */
 			let sawData = false;
+			/** 已收到的字节数，超时时写进错误信息，用来区分“服务端一个字节都没给”和“只给了 keep-alive” */
+			let receivedBytes = 0;
+			const receivedInfo = () => `期间收到 ${receivedBytes} 字节${sawData ? '' : '，没有任何数据帧'}`;
 
 			const touch = (response?: any) => {
 				const text = typeof response?.responseText === 'string' ? response.responseText : '';
 				if (text) {
+					receivedBytes = Math.max(receivedBytes, text.length);
 					sawProgress = true;
 					if (!sawData && /(^|\n)\s*data:/.test(text)) {
 						sawData = true;
@@ -471,12 +475,12 @@ export async function postChatStream(
 				if (now - startedAt > limits.totalMs) {
 					finish(() => {
 						abort();
-						reject(new Error(`AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1000)} 秒）`));
+						reject(new Error(`AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1000)} 秒，${receivedInfo()}）`));
 					});
 				} else if (sawProgress && now - lastActivity > limits.idleMs) {
 					finish(() => {
 						abort();
-						reject(new Error(`AI 超过 ${Math.round(limits.idleMs / 1000)} 秒没有返回任何内容`));
+						reject(new Error(`AI 超过 ${Math.round(limits.idleMs / 1000)} 秒没有返回任何内容（${receivedInfo()}）`));
 					});
 				}
 			}, 2000);
@@ -914,7 +918,7 @@ export const DEFAULT_AI_MAX_WAIT_SECONDS = 600;
 /** 流式传输时，超过这个时间没有收到任何数据，认为连接已经卡死（毫秒） */
 const AI_IDLE_TIMEOUT = 120 * 1000;
 /** 单次 AI 请求的最长时间（毫秒）；超过后放弃并重发（总时限仍受“单题最长等待”约束） */
-const AI_ATTEMPT_MAX_MS = 300 * 1000;
+const AI_ATTEMPT_MAX_MS = 180 * 1000;
 /** 剩余时间低于这个值时，不再发起新的可选请求（联网搜索、重新作答），避免超过总时限 */
 const AI_MIN_REMAINING_FOR_OPTIONAL = 20 * 1000;
 const AI_SYSTEM_PROMPT = [
@@ -1258,7 +1262,9 @@ async function postJsonWithRetry(
 	headers: Record<string, string>,
 	timeout: number,
 	/** 使用流式传输：timeout 为总时限，同时启用“长时间无数据”检测 */
-	stream = false
+	stream = false,
+	/** 第一次请求失败（超时 / 服务端繁忙）后改用的请求体，例如关闭深度思考：更快，也更容易被服务端接受 */
+	retryBody?: Record<string, any>
 ) {
 	let lastError: unknown;
 	// timeout 是整道题的总预算，所有重试共用，避免“每次重试都重新计时”导致实际等待远超设置
@@ -1270,10 +1276,11 @@ async function postJsonWithRetry(
 		}
 		// 单次请求不超过 AI_ATTEMPT_MAX_MS：服务端排队卡死时尽快放弃并重发，而不是傻等到总时限
 		const attemptMs = Math.max(5000, Math.min(left, AI_ATTEMPT_MAX_MS));
+		const attemptBody = attempt > 0 && retryBody ? retryBody : body;
 		try {
 			const response = stream
-				? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: attemptMs })
-				: await postJson(url, body, headers, attemptMs);
+				? await postChatStream(url, attemptBody, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: attemptMs })
+				: await postJson(url, attemptBody, headers, attemptMs);
 			const retryable =
 				response.status === 408 ||
 				response.status === 409 ||
@@ -1616,7 +1623,15 @@ async function searchAiQuestionInner(env: SearchEnv, scene: SearchScene): Promis
 				attempt: attempt + 1,
 				remainingSeconds: Math.round(remaining() / 1000)
 			});
-			const response = await postJsonWithRetry(url, requestBody, authHeaders, remaining(), true);
+			const response = await postJsonWithRetry(
+				url,
+				requestBody,
+				authHeaders,
+				remaining(),
+				true,
+				// 深度思考的请求超时 / 服务端繁忙时，重试改用不思考的请求（响应快得多）
+				useThinking ? buildRequestBody(imageParts, false) : undefined
+			);
 			$debug.log('ai', '收到响应', {
 				status: response.status,
 				elapsedSeconds: Math.round((Date.now() - startedAt) / 1000),

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name       				南城派网课助手 - 全域名通用版
-// @version    				4.12.48
+// @version    				4.12.49
 // @description				南城派网课助手，基于 OCSJS 二次开发，支持  【超星学习通】 【知到智慧树】 【职教云】 【智慧职教】 【中国大学MOOC】 等网课的学习、作业、考试。
 // @author     				ncccp1
 // @license    				MIT
@@ -4027,7 +4027,7 @@ var __publicField = (obj, key, value) => {
       this.opts = opts;
     }
     async doWork(options) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e, _f;
       this.emit("start");
       this.isRunning = true;
       let wakeResolver;
@@ -4090,6 +4090,11 @@ var __publicField = (obj, key, value) => {
           console.error("onResultsUpdate 回调出错", err);
         }
       };
+      try {
+        await ((_f = (_e = this.opts).onInit) == null ? void 0 : _f.call(_e, results));
+      } catch (err) {
+        console.error("onInit 回调出错", err);
+      }
       const resolveQueue = [];
       const getSearchLimitMs = () => ((AnswerWrapperHandlerConfig.timeout_seconds || 60) + 10 + (AnswerWrapperHandlerConfig.extra_wait_seconds || 0)) * 1e3;
       const searchOne = async (index) => {
@@ -10027,9 +10032,12 @@ ${content}</tr>
         let lastActivity2 = Date.now();
         let sawProgress = false;
         let sawData = false;
+        let receivedBytes = 0;
+        const receivedInfo = () => `期间收到 ${receivedBytes} 字节${sawData ? "" : "，没有任何数据帧"}`;
         const touch = (response) => {
           const text = typeof (response == null ? void 0 : response.responseText) === "string" ? response.responseText : "";
           if (text) {
+            receivedBytes = Math.max(receivedBytes, text.length);
             sawProgress = true;
             if (!sawData && /(^|\n)\s*data:/.test(text)) {
               sawData = true;
@@ -10059,12 +10067,12 @@ ${content}</tr>
           if (now2 - startedAt > limits.totalMs) {
             finish(() => {
               abort();
-              reject(new Error(`AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1e3)} 秒）`));
+              reject(new Error(`AI 答题超过最长等待时间（${Math.round(limits.totalMs / 1e3)} 秒，${receivedInfo()}）`));
             });
           } else if (sawProgress && now2 - lastActivity2 > limits.idleMs) {
             finish(() => {
               abort();
-              reject(new Error(`AI 超过 ${Math.round(limits.idleMs / 1e3)} 秒没有返回任何内容`));
+              reject(new Error(`AI 超过 ${Math.round(limits.idleMs / 1e3)} 秒没有返回任何内容（${receivedInfo()}）`));
             });
           }
         }, 2e3);
@@ -10431,7 +10439,7 @@ ${content}</tr>
   };
   const DEFAULT_AI_MAX_WAIT_SECONDS = 600;
   const AI_IDLE_TIMEOUT = 120 * 1e3;
-  const AI_ATTEMPT_MAX_MS = 300 * 1e3;
+  const AI_ATTEMPT_MAX_MS = 180 * 1e3;
   const AI_MIN_REMAINING_FOR_OPTIONAL = 20 * 1e3;
   const AI_SYSTEM_PROMPT = [
     "你是严谨的题库答题助手。根据给出的题型、题目和选项作答，只输出一个 JSON 对象，不要输出任何其他内容。",
@@ -10680,7 +10688,7 @@ ${content}</tr>
     }
     return lines.map((line, index) => `${index + 1}. ${line}`).join("\n").slice(0, 3e3);
   }
-  async function postJsonWithRetry(url, body, headers, timeout, stream = false) {
+  async function postJsonWithRetry(url, body, headers, timeout, stream = false, retryBody) {
     let lastError;
     const deadline = Date.now() + timeout;
     for (let attempt = 0; attempt <= 2; attempt++) {
@@ -10689,8 +10697,9 @@ ${content}</tr>
         break;
       }
       const attemptMs = Math.max(5e3, Math.min(left, AI_ATTEMPT_MAX_MS));
+      const attemptBody = attempt > 0 && retryBody ? retryBody : body;
       try {
-        const response = stream ? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: attemptMs }) : await postJson(url, body, headers, attemptMs);
+        const response = stream ? await postChatStream(url, attemptBody, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: attemptMs }) : await postJson(url, attemptBody, headers, attemptMs);
         const retryable = response.status === 408 || response.status === 409 || response.status === 425 || response.status === 429 || response.status >= 500;
         if (retryable && attempt < 2) {
           $searchConsole.warn(`AI 请求异常（HTTP ${response.status}），准备第 ${attempt + 1} 次重试`);
@@ -10950,7 +10959,14 @@ ${searchContext}` : "",
           attempt: attempt + 1,
           remainingSeconds: Math.round(remaining() / 1e3)
         });
-        const response = await postJsonWithRetry(url, requestBody, authHeaders, remaining(), true);
+        const response = await postJsonWithRetry(
+          url,
+          requestBody,
+          authHeaders,
+          remaining(),
+          true,
+          useThinking ? buildRequestBody(imageParts, false) : void 0
+        );
         $debug.log("ai", "收到响应", {
           status: response.status,
           elapsedSeconds: Math.round((Date.now() - startedAt) / 1e3),
@@ -20652,6 +20668,12 @@ ${searchContext}` : "",
         }
         return { finish: false };
       },
+      onInit(res) {
+        if (preview_mode) {
+          CommonProject.scripts.workResults.methods.setResults(simplifyWorkResult(res, workOrExamQuestionTitleTransform));
+          CommonProject.scripts.workResults.methods.updateWorkStateByResults(res);
+        }
+      },
       async onResultsUpdate(current, _, res) {
         var _a, _b, _c;
         updateTaskFromResults(res, {
@@ -21814,6 +21836,12 @@ ${searchContext}` : "",
             return { finish: false };
           }
           return { finish: false };
+        },
+        onInit(res) {
+          CommonProject.scripts.workResults.methods.setResults(
+            simplifyWorkResult(res, chapterTestTaskQuestionTitleTransform)
+          );
+          CommonProject.scripts.workResults.methods.updateWorkStateByResults(res);
         },
         async onResultsUpdate(curr, _, res) {
           var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;

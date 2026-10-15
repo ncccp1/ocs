@@ -218,6 +218,8 @@ export interface WorkOptions<E extends RawElements> {
 	) => void | Promise<void>;
 	/** 监听答题结果 */
 	onResultsUpdate?: (currentResult: WorkResult<E>, currentIndex: number, res: WorkResult<E>[]) => void | Promise<void>;
+	/** 所有题目都读取完毕、开始搜题之前触发，可用于先把题目列表展示出来（此时所有题目都是“等待搜索中”） */
+	onInit?: (res: WorkResult<E>[]) => void | Promise<void>;
 }
 
 export interface CustomWorkOptions {

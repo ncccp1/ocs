@@ -1,6 +1,6 @@
 {
 	"name": "nanchengpai-course-helper",
-	"version": "4.12.48",
+	"version": "4.12.49",
 	"description": "南城派网课助手，基于 OCSJS 二次开发的网课辅助项目",
 	"types": "./lib/src/core/index.d.ts",
 	"main": "./lib/src/core/index.js",

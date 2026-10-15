@@ -959,6 +959,14 @@ function workOrExam(type: 'work' | 'exam' = 'work', options: WorkOrExamOptions) 
 			return { finish: false };
 		},
 
+		/** 题目读取完成：预览模式下先把所有题目显示在搜索结果里（等待搜索中） */
+		onInit(res) {
+			if (preview_mode) {
+				CommonProject.scripts.workResults.methods.setResults(simplifyWorkResult(res, workOrExamQuestionTitleTransform));
+				CommonProject.scripts.workResults.methods.updateWorkStateByResults(res);
+			}
+		},
+
 		/** 完成答题后 */
 		async onResultsUpdate(current, _, res) {
 			updateTaskFromResults(res, {
@@ -2496,6 +2504,14 @@ const JobRunner = {
 				}
 
 				return { finish: false };
+			},
+
+			/** 题目读取完成：先把所有题目显示在搜索结果里（等待搜索中），而不是搜完第一题才出现 */
+			onInit(res) {
+				CommonProject.scripts.workResults.methods.setResults(
+					simplifyWorkResult(res, chapterTestTaskQuestionTitleTransform)
+				);
+				CommonProject.scripts.workResults.methods.updateWorkStateByResults(res);
 			},
 
 			/** 完成答题后 */

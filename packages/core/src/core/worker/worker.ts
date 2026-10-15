@@ -134,6 +134,12 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 			}
 		};
 
+		try {
+			await this.opts.onInit?.(results);
+		} catch (err) {
+			console.error('onInit 回调出错', err);
+		}
+
 		/** 搜题已完成、等待作答的题目序号 */
 		const resolveQueue: number[] = [];
 
