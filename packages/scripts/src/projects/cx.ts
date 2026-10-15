@@ -2357,6 +2357,12 @@ const JobRunner = {
 		// 最大化面板
 		CORSUtils.panelNormal();
 		CommonProject.scripts.workResults.methods.init();
+		// 先把题目总数写进去，避免第一题搜完之前面板一直显示 “已搜题 0/0”
+		CommonProject.scripts.workResults.methods.updateWorkState({
+			totalQuestionCount: TiMu.length,
+			requestedCount: 0,
+			resolvedCount: 0
+		});
 		// 固定显示答题结果面板
 		CORSUtils.pinWorkPanel();
 

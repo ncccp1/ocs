@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name       				南城派网课助手 - 全域名通用版
-// @version    				4.12.47
+// @version    				4.12.48
 // @description				南城派网课助手，基于 OCSJS 二次开发，支持  【超星学习通】 【知到智慧树】 【职教云】 【智慧职教】 【中国大学MOOC】 等网课的学习、作业、考试。
 // @author     				ncccp1
 // @license    				MIT
@@ -4030,14 +4030,22 @@ var __publicField = (obj, key, value) => {
       var _a, _b, _c, _d;
       this.emit("start");
       this.isRunning = true;
+      let wakeResolver;
+      const wake = () => {
+        const fn = wakeResolver;
+        wakeResolver = void 0;
+        fn == null ? void 0 : fn();
+      };
       this.once("close", () => {
         this.isClose = true;
+        wake();
       });
       this.on("stop", () => {
         this.isStop = true;
       });
       this.on("continuate", () => {
         this.isStop = false;
+        wake();
       });
       const questionRoots = typeof this.opts.root === "string" ? Array.from(document.querySelectorAll(this.opts.root)) : this.opts.root;
       this.totalQuestionCount += questionRoots.length;
@@ -4074,17 +4082,28 @@ var __publicField = (obj, key, value) => {
       if (options == null ? void 0 : options.enable_debug) {
         console.debug("上下文已初始化: ", results);
       }
-      const requestThread = async (index) => {
-        var _a2, _b2, _c2;
-        let error;
+      const notifyResultsUpdate = async (result, index) => {
+        var _a2, _b2;
+        try {
+          await ((_b2 = (_a2 = this.opts).onResultsUpdate) == null ? void 0 : _b2.call(_a2, result, index, results));
+        } catch (err) {
+          console.error("onResultsUpdate 回调出错", err);
+        }
+      };
+      const resolveQueue = [];
+      const getSearchLimitMs = () => ((AnswerWrapperHandlerConfig.timeout_seconds || 60) + 10 + (AnswerWrapperHandlerConfig.extra_wait_seconds || 0)) * 1e3;
+      const searchOne = async (index) => {
+        var _a2;
         const result = results[index];
         const ctx = result.ctx || {};
-        if (this.isClose === true) {
-          this.isRunning = false;
-          return;
-        }
         if (this.isStop) {
-          await waitForContinuate(() => this.isStop);
+          await waitForContinuate(
+            () => this.isStop,
+            () => this.isClose
+          );
+        }
+        if (this.isClose === true) {
+          return;
         }
         ctx.searchInfos = [];
         if (options == null ? void 0 : options.enable_debug) {
@@ -4095,16 +4114,30 @@ var __publicField = (obj, key, value) => {
           );
           console.log("ctx", result.ctx);
         }
+        let error;
+        let timer;
         try {
-          ctx.searchInfos = await this.opts.answerer(ctx.elements, ctx) || [];
-          ctx.searchInfos.forEach((info) => {
+          const limitMs = getSearchLimitMs();
+          const timeout = new Promise((resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`搜题超过 ${Math.round(limitMs / 1e3)} 秒没有返回结果，已放弃这道题`)),
+              limitMs
+            );
+          });
+          const infos = await Promise.race([Promise.resolve(this.opts.answerer(ctx.elements, ctx)), timeout]) || [];
+          infos.forEach((info) => {
             info.results = info.results.map((ans) => {
               ans.answer = ans.answer ? ans.answer.trim() : "";
               return ans;
             });
           });
+          ctx.searchInfos = infos;
         } catch (err) {
-          error = String(err);
+          error = err instanceof Error ? err.message : String(err);
+        } finally {
+          if (timer) {
+            clearTimeout(timer);
+          }
         }
         result.ctx = ctx;
         result.requested = true;
@@ -4112,41 +4145,55 @@ var __publicField = (obj, key, value) => {
         if (options == null ? void 0 : options.enable_debug) {
           console.log("搜题结果: ", ctx.searchInfos);
         }
-        await ((_c2 = (_b2 = this.opts).onResultsUpdate) == null ? void 0 : _c2.call(_b2, results[index], index, results));
+        resolveQueue.push(index);
+        wake();
+        await notifyResultsUpdate(result, index);
       };
-      const waitForRequested = async (result) => {
-        const waitSeconds = AnswerWrapperHandlerConfig.timeout_seconds;
-        return new Promise((resolve, reject) => {
-          const interval = setInterval(() => {
-            if ((result == null ? void 0 : result.requested) === true) {
-              clearInterval(interval);
-              clearTimeout(timeout);
-              resolve();
-            }
-          }, 200);
-          const timeout = setTimeout(() => {
-            clearInterval(interval);
-            reject(new Error("答题超时！"));
-          }, (waitSeconds + 10 + (AnswerWrapperHandlerConfig.extra_wait_seconds || 0)) * 1e3);
-        });
+      const searchThreadCount = Math.max(1, Math.floor(this.opts.thread || 1));
+      let nextIndex = 0;
+      const searchThread = async () => {
+        while (this.isClose === false) {
+          const index = nextIndex++;
+          if (index >= results.length) {
+            return;
+          }
+          try {
+            await searchOne(index);
+          } catch (err) {
+            console.error(err);
+          }
+        }
       };
       const resolverThread = async () => {
-        var _a2, _b2, _c2, _d2;
-        for (let index = 0; index < results.length; index++) {
-          const result = results[index];
-          let error;
-          let res;
+        var _a2, _b2;
+        let resolvedCount = 0;
+        while (resolvedCount < results.length) {
           if (this.isClose === true) {
             this.isRunning = false;
             return;
           }
-          try {
-            if (this.isStop) {
-              await waitForContinuate(() => this.isStop);
-            }
-            await waitForRequested(result);
-          } catch (err) {
+          if (resolveQueue.length === 0) {
+            await new Promise((resolve) => {
+              const timer = setTimeout(resolve, 1e3);
+              wakeResolver = () => {
+                clearTimeout(timer);
+                resolve();
+              };
+            });
+            continue;
           }
+          if (this.isStop) {
+            await waitForContinuate(
+              () => this.isStop,
+              () => this.isClose
+            );
+            continue;
+          }
+          resolveQueue.sort((a, b) => a - b);
+          const index = resolveQueue.shift();
+          const result = results[index];
+          let error;
+          let res;
           try {
             if (result.ctx && result.ctx.searchInfos.length !== 0) {
               if (typeof this.opts.work === "object") {
@@ -4166,7 +4213,7 @@ var __publicField = (obj, key, value) => {
                 res = await work2(result.ctx);
               }
             } else {
-              error = "搜索不到答案, 请重新运行, 或者忽略此题。";
+              error = result.error ? `搜题失败：${result.error}` : "搜索不到答案, 请重新运行, 或者忽略此题。";
             }
           } catch (err) {
             error = (err == null ? void 0 : err.message) || err;
@@ -4174,6 +4221,7 @@ var __publicField = (obj, key, value) => {
           result.error = error;
           result.result = res || { finish: false };
           result.resolved = true;
+          resolvedCount++;
           if (options == null ? void 0 : options.enable_debug) {
             console.log(
               "答题完成: ",
@@ -4181,58 +4229,13 @@ var __publicField = (obj, key, value) => {
               result
             );
           }
-          await ((_d2 = (_c2 = this.opts).onResultsUpdate) == null ? void 0 : _d2.call(_c2, result, index, results));
+          await notifyResultsUpdate(result, index);
         }
       };
-      const requestThreadHandler = async () => {
-        const locks = [];
-        const waitForLock = () => {
-          return new Promise((resolve, reject) => {
-            const interval = setInterval(() => {
-              if (locks.length > 0) {
-                const lock = locks.shift();
-                if (lock) {
-                  resolve(lock);
-                  clearInterval(interval);
-                  clearTimeout(timeout);
-                }
-              }
-            }, 100);
-            const timeout = setTimeout(() => {
-              clearInterval(interval);
-              reject(new Error("获取线程锁超时！"));
-            }, 3 * 60 * 1e3);
-          });
-        };
-        const requestThreads = [];
-        for (let index = 0; index < results.length; index++) {
-          requestThreads.push(() => requestThread(index));
-        }
-        for (let index = 0; index < (this.opts.thread || 1); index++) {
-          locks.push(index + 1);
-        }
-        let requestFinished = 0;
-        const promises = [];
-        for (let index = 0; index < (this.opts.thread || 1); index++) {
-          promises.push(async () => {
-            try {
-              while (requestFinished < results.length && requestThreads.length > 0 && this.isClose === false) {
-                const thread = requestThreads.shift();
-                if (thread) {
-                  const lock = await waitForLock();
-                  await thread();
-                  requestFinished++;
-                  locks.push(lock);
-                }
-              }
-            } catch (err) {
-              console.error(err);
-            }
-          });
-        }
-        await Promise.all(promises.map((f) => f()));
-      };
-      await Promise.all([resolverThread(), requestThreadHandler()]);
+      await Promise.all([
+        resolverThread(),
+        ...Array.from({ length: Math.min(searchThreadCount, results.length) }, () => searchThread())
+      ]);
       this.isRunning = false;
       return results;
     }
@@ -4288,7 +4291,10 @@ var __publicField = (obj, key, value) => {
           return;
         }
         if (this.isStop) {
-          await waitForContinuate(() => this.isStop);
+          await waitForContinuate(
+            () => this.isStop,
+            () => this.isClose
+          );
         }
         const question = questions[index];
         results[index] = {
@@ -4332,11 +4338,11 @@ var __publicField = (obj, key, value) => {
       }
     }
   }
-  async function waitForContinuate(isStopping) {
+  async function waitForContinuate(isStopping, isClosed = () => false) {
     if (isStopping()) {
-      await new Promise((resolve, reject) => {
+      await new Promise((resolve) => {
         const interval = setInterval(() => {
-          if (isStopping() === false) {
+          if (isStopping() === false || isClosed()) {
             clearInterval(interval);
             resolve();
           }
@@ -10020,9 +10026,18 @@ ${content}</tr>
         let finished = false;
         let lastActivity2 = Date.now();
         let sawProgress = false;
-        const touch = () => {
-          sawProgress = true;
-          lastActivity2 = Date.now();
+        let sawData = false;
+        const touch = (response) => {
+          const text = typeof (response == null ? void 0 : response.responseText) === "string" ? response.responseText : "";
+          if (text) {
+            sawProgress = true;
+            if (!sawData && /(^|\n)\s*data:/.test(text)) {
+              sawData = true;
+            }
+          }
+          if (sawData || !text) {
+            lastActivity2 = Date.now();
+          }
         };
         const finish = (action) => {
           if (finished) {
@@ -10096,8 +10111,10 @@ ${content}</tr>
           if (done) {
             break;
           }
-          lastActivity = Date.now();
           text += decoder.decode(value, { stream: true });
+          if (/(^|\n)\s*data:/.test(text)) {
+            lastActivity = Date.now();
+          }
         }
       } else {
         text = await response.text();
@@ -10218,28 +10235,36 @@ ${content}</tr>
     };
   }
   async function fillMetoHiddenAnswers(results, scene, question) {
-    for (const result of results) {
-      const extraData = result.extra_data || {};
-      if (extraData.hideAnswer && extraData.problemId) {
-        try {
-          const answer = await fetchMetoRealAnswer(Number(extraData.problemId), scene, question);
-          result.answer = answer.answer;
-          result.extra_data = {
-            ...extraData,
-            hideAnswer: false,
-            userAnswer: answer.userAnswer,
-            createBy: answer.createBy,
-            verifyStatus: answer.verifyStatus,
-            realAnswer: true
-          };
-        } catch (error) {
-          $searchConsole.warn(`MeTo 获取真实答案失败: ${problemIdText(extraData.problemId)}`, {
-            question,
-            error: stringifyError(error)
-          });
+    await Promise.all(
+      results.map(async (result) => {
+        const extraData = result.extra_data || {};
+        if (!extraData.hideAnswer) {
+          return;
         }
-      }
-    }
+        if (extraData.problemId) {
+          try {
+            const answer = await fetchMetoRealAnswer(Number(extraData.problemId), scene, question);
+            result.answer = answer.answer;
+            result.extra_data = {
+              ...extraData,
+              hideAnswer: false,
+              userAnswer: answer.userAnswer,
+              createBy: answer.createBy,
+              verifyStatus: answer.verifyStatus,
+              realAnswer: true
+            };
+            return;
+          } catch (error) {
+            $searchConsole.warn(`MeTo 获取真实答案失败: ${problemIdText(extraData.problemId)}`, {
+              question,
+              error: stringifyError(error)
+            });
+          }
+        }
+        result.extra_data = { ...extraData, hiddenNotice: result.answer };
+        result.answer = "";
+      })
+    );
   }
   function problemIdText(problemId) {
     return typeof problemId === "number" || typeof problemId === "string" ? `problemId=${problemId}` : "problemId=unknown";
@@ -10271,6 +10296,15 @@ ${content}</tr>
         });
       }
       results = filteredResults;
+      if (scene === "auto") {
+        const related = results.filter((result) => isRelatedQuestion(title, result.question));
+        if (related.length !== results.length) {
+          $searchConsole.info(`MeTo 丢弃了 ${results.length - related.length} 条与题目不相关的结果`, {
+            question: title
+          });
+        }
+        results = related;
+      }
       await fillMetoHiddenAnswers(results, scene, title);
       $searchConsole.info(`MeTo 搜题完成，命中 ${results.length} 条`, {
         scene,
@@ -10397,6 +10431,7 @@ ${content}</tr>
   };
   const DEFAULT_AI_MAX_WAIT_SECONDS = 600;
   const AI_IDLE_TIMEOUT = 120 * 1e3;
+  const AI_ATTEMPT_MAX_MS = 300 * 1e3;
   const AI_MIN_REMAINING_FOR_OPTIONAL = 20 * 1e3;
   const AI_SYSTEM_PROMPT = [
     "你是严谨的题库答题助手。根据给出的题型、题目和选项作答，只输出一个 JSON 对象，不要输出任何其他内容。",
@@ -10647,9 +10682,15 @@ ${content}</tr>
   }
   async function postJsonWithRetry(url, body, headers, timeout, stream = false) {
     let lastError;
+    const deadline = Date.now() + timeout;
     for (let attempt = 0; attempt <= 2; attempt++) {
+      const left = deadline - Date.now();
+      if (attempt > 0 && left < 5e3) {
+        break;
+      }
+      const attemptMs = Math.max(5e3, Math.min(left, AI_ATTEMPT_MAX_MS));
       try {
-        const response = stream ? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: timeout }) : await postJson(url, body, headers, timeout);
+        const response = stream ? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: attemptMs }) : await postJson(url, body, headers, attemptMs);
         const retryable = response.status === 408 || response.status === 409 || response.status === 425 || response.status === 429 || response.status >= 500;
         if (retryable && attempt < 2) {
           $searchConsole.warn(`AI 请求异常（HTTP ${response.status}），准备第 ${attempt + 1} 次重试`);
@@ -10659,10 +10700,10 @@ ${content}</tr>
         return response;
       } catch (error) {
         lastError = error;
-        if (attempt >= 1) {
+        if (attempt >= 2) {
           break;
         }
-        $searchConsole.warn(`AI 请求出错（${stringifyError(error)}），准备重试`);
+        $searchConsole.warn(`AI 请求出错（${stringifyError(error)}），准备第 ${attempt + 1} 次重试`);
         await lib.$.sleep(1500);
       }
     }
@@ -10710,6 +10751,31 @@ ${content}</tr>
     }
     return merged.join("\n");
   }
+  const AI_BREAKER_THRESHOLD = 3;
+  const AI_BREAKER_COOLDOWN_MS = 60 * 1e3;
+  const AI_BREAKER_MAX_COOLDOWN_MS = 5 * 60 * 1e3;
+  let aiServiceFailureStreak = 0;
+  let aiBreakerUntil = 0;
+  let aiBreakerCooldown = AI_BREAKER_COOLDOWN_MS;
+  function recordAiServiceResult(ok) {
+    if (ok) {
+      aiServiceFailureStreak = 0;
+      aiBreakerCooldown = AI_BREAKER_COOLDOWN_MS;
+      return;
+    }
+    aiServiceFailureStreak++;
+    if (aiServiceFailureStreak >= AI_BREAKER_THRESHOLD) {
+      aiBreakerUntil = Date.now() + aiBreakerCooldown;
+      $searchConsole.warn(
+        `AI 服务连续 ${aiServiceFailureStreak} 次请求失败（繁忙或网络异常），暂停 AI 答题 ${Math.round(
+          aiBreakerCooldown / 1e3
+        )} 秒，期间的题目会直接跳过 AI。`
+      );
+      $debug.warn("ai", "熔断", { streak: aiServiceFailureStreak, cooldownMs: aiBreakerCooldown });
+      aiBreakerCooldown = Math.min(AI_BREAKER_MAX_COOLDOWN_MS, aiBreakerCooldown * 2);
+      aiServiceFailureStreak = AI_BREAKER_THRESHOLD - 1;
+    }
+  }
   async function searchAiQuestionInner(env, scene) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v;
     const config2 = getAiConfig();
@@ -10719,6 +10785,18 @@ ${content}</tr>
     const title = String(env.title || "").trim();
     if (!title) {
       return void 0;
+    }
+    if (Date.now() < aiBreakerUntil) {
+      const seconds = Math.ceil((aiBreakerUntil - Date.now()) / 1e3);
+      $searchConsole.warn(`AI 服务近期连续失败，暂时跳过 AI（约 ${seconds} 秒后重试）: ${title}`);
+      notifyAiFailure(title, `AI 服务近期连续失败，暂停 ${seconds} 秒`);
+      return createEmptySearchInfo(
+        createAiWrapper(
+          /\/chat\/completions$/.test(config2.baseUrl) ? config2.baseUrl : `${config2.baseUrl}/chat/completions`,
+          config2.model
+        ),
+        "AI 服务近期连续失败，已暂时跳过"
+      );
     }
     const url = /\/chat\/completions$/.test(config2.baseUrl) ? config2.baseUrl : `${config2.baseUrl}/chat/completions`;
     const wrapper = createAiWrapper(url, config2.model);
@@ -10887,6 +10965,9 @@ ${searchContext}` : "",
             attempt--;
             continue;
           }
+          if (response.status === 429 || response.status >= 500) {
+            recordAiServiceResult(false);
+          }
           $searchConsole.error(`AI 答题请求失败: ${title}`, { status: response.status, message: message2 });
           notifyAiFailure(
             title,
@@ -10895,6 +10976,7 @@ ${searchContext}` : "",
           );
           return createEmptySearchInfo(wrapper, `AI 请求失败：${message2}`);
         }
+        recordAiServiceResult(true);
         const content = String(((_j = (_i = (_h = (_g = response.json) == null ? void 0 : _g.choices) == null ? void 0 : _h[0]) == null ? void 0 : _i.message) == null ? void 0 : _j.content) || "");
         const parsed = content ? parseAiContent(content) : void 0;
         if (!parsed) {
@@ -11031,6 +11113,7 @@ ${searchContext}` : "",
       notifyAiFailure(title, "AI 返回内容为空或格式错误");
       return createEmptySearchInfo(wrapper, "AI 返回内容为空或格式错误");
     } catch (error) {
+      recordAiServiceResult(false);
       $searchConsole.error(`AI 答题失败: ${title}`, { scene, error: stringifyError(error) });
       notifyAiFailure(title, stringifyError(error).slice(0, 80));
       return createEmptySearchInfo(wrapper, stringifyError(error));
@@ -11052,6 +11135,19 @@ ${searchContext}` : "",
   function stripUrls(text) {
     return String(text || "").replace(/https?:\/\/\S+/g, "");
   }
+  function isRelatedQuestion(title, question) {
+    const stripped = stripUrls(question || "");
+    const nq = normalizeText(stripped);
+    if (!nq) {
+      return true;
+    }
+    const target = stripUrls(title);
+    const nt = normalizeText(target);
+    if (Math.min(nq.length, nt.length) >= 6 && (nq.includes(nt) || nt.includes(nq))) {
+      return true;
+    }
+    return textSimilarity(target, stripped) >= CREDIBLE_SIMILARITY;
+  }
   function isCredibleAnswer(title, result) {
     var _a;
     const answer = String(result.answer || "").replace(/\s+/g, "").trim();
@@ -11061,17 +11157,7 @@ ${searchContext}` : "",
     if ((_a = result.extra_data) == null ? void 0 : _a.cache) {
       return true;
     }
-    const question = stripUrls(result.question || "");
-    if (!normalizeText(question)) {
-      return true;
-    }
-    const target = stripUrls(title);
-    const nq = normalizeText(question);
-    const nt = normalizeText(target);
-    if (Math.min(nq.length, nt.length) >= 6 && (nq.includes(nt) || nt.includes(nq))) {
-      return true;
-    }
-    return textSimilarity(target, question) >= CREDIBLE_SIMILARITY;
+    return isRelatedQuestion(title, result.question);
   }
   function hasCredibleResult(title, infos, optionsText = "") {
     const credible = infos.flatMap((info) => info.results).filter((result) => isCredibleAnswer(title, result));
@@ -11138,6 +11224,19 @@ ${searchContext}` : "",
           infos.unshift(aiInfo);
         } else {
           infos.push(aiInfo);
+        }
+      }
+    }
+    if (scene === "auto") {
+      const title = String(env.title || "");
+      for (const info of infos) {
+        const before = info.results.length;
+        info.results = info.results.filter((result) => isCredibleAnswer(title, result));
+        if (before !== info.results.length) {
+          $debug.log("answerer", `${info.name} 丢弃了不相关或无答案的结果`, {
+            title: title.slice(0, 40),
+            dropped: before - info.results.length
+          });
         }
       }
     }
@@ -21607,6 +21706,11 @@ ${searchContext}` : "",
       const { TiMu } = domSearchAll({ TiMu: ".TiMu" }, frameWindow.document);
       CORSUtils.panelNormal();
       CommonProject.scripts.workResults.methods.init();
+      CommonProject.scripts.workResults.methods.updateWorkState({
+        totalQuestionCount: TiMu.length,
+        requestedCount: 0,
+        resolvedCount: 0
+      });
       CORSUtils.pinWorkPanel();
       const chapterTestTaskQuestionTitleTransform = (titles) => transformChapterTestTitle(titles, redundanceWordsText);
       if (frameWindow) {

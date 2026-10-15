@@ -21,6 +21,10 @@ import { AnswerWrapperHandlerConfig } from '../answer-wrapper';
  * @param work      工作器, 传入一个方法可自定义工作器，或者使用默认的工作器，详情： {@link WorkOptions.work}
  * @param answerer  查题器, : 默认是 {@link defaultAnswerWrapperHandler}
  *
+ * 调度模型（搜题和答题互不阻塞）：
+ *  - 搜题：最多 `thread` 道题同时搜索，每道题的搜索都有独立的时限（搜题超时 + AI 额外等待），
+ *    超时后这道题按“搜不到答案”处理，不会占着线程，也不会拖住后面的题目；
+ *  - 答题：谁先搜完谁先作答（同时搜完的按题号顺序），答题动作串行执行，避免同时操作页面。
  */
 export class OCSWorker<E extends RawElements = RawElements> extends CommonEventEmitter<WorkerEvents> {
 	opts: WorkOptions<E>;
@@ -39,8 +43,17 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 		this.emit('start');
 		this.isRunning = true;
 
+		/** 唤醒答题线程（有题目搜完 / 关闭 / 继续时调用） */
+		let wakeResolver: (() => void) | undefined;
+		const wake = () => {
+			const fn = wakeResolver;
+			wakeResolver = undefined;
+			fn?.();
+		};
+
 		this.once('close', () => {
 			this.isClose = true;
+			wake();
 		});
 
 		this.on('stop', () => {
@@ -49,6 +62,7 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 
 		this.on('continuate', () => {
 			this.isStop = false;
+			wake();
 		});
 
 		/** 寻找题目父节点 */
@@ -111,21 +125,38 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 			console.debug('上下文已初始化: ', results);
 		}
 
-		/** 请求答案的线程 */
-		const requestThread = async (index: number) => {
-			let error: string | undefined;
+		/** 调用外部回调，回调里的异常只记录，不能中断搜题 / 答题流程 */
+		const notifyResultsUpdate = async (result: WorkResult<E>, index: number) => {
+			try {
+				await this.opts.onResultsUpdate?.(result, index, results);
+			} catch (err) {
+				console.error('onResultsUpdate 回调出错', err);
+			}
+		};
+
+		/** 搜题已完成、等待作答的题目序号 */
+		const resolveQueue: number[] = [];
+
+		/** 单道题的搜索时限（毫秒）：题库超时 + 缓冲 + AI 额外等待，每次搜题时读取最新配置 */
+		const getSearchLimitMs = () =>
+			((AnswerWrapperHandlerConfig.timeout_seconds || 60) + 10 + (AnswerWrapperHandlerConfig.extra_wait_seconds || 0)) *
+			1000;
+
+		/** 搜索一道题 */
+		const searchOne = async (index: number) => {
 			const result = results[index];
 			const ctx = result.ctx || ({} as WorkContext<E>);
 
-			/** 强行关闭 */
-			if (this.isClose === true) {
-				this.isRunning = false;
-				return;
-			}
-
 			/** 检查是否暂停中 */
 			if (this.isStop) {
-				await waitForContinuate(() => this.isStop);
+				await waitForContinuate(
+					() => this.isStop,
+					() => this.isClose
+				);
+			}
+			/** 强行关闭 */
+			if (this.isClose === true) {
+				return;
 			}
 
 			/** 查找答案 */
@@ -144,18 +175,32 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 				console.log('ctx', result.ctx);
 			}
 
+			let error: string | undefined;
+			let timer: ReturnType<typeof setTimeout> | undefined;
 			try {
-				ctx.searchInfos = (await this.opts.answerer(ctx.elements, ctx)) || [];
+				const limitMs = getSearchLimitMs();
+				const timeout = new Promise<never>((resolve, reject) => {
+					timer = setTimeout(
+						() => reject(new Error(`搜题超过 ${Math.round(limitMs / 1000)} 秒没有返回结果，已放弃这道题`)),
+						limitMs
+					);
+				});
+				const infos = (await Promise.race([Promise.resolve(this.opts.answerer(ctx.elements, ctx)), timeout])) || [];
 
 				// 答案为 undefined 的情况， 需要赋值给一个空字符串，因为可能传回的题目中带有其他提示信息，或者题目里包含答案。
-				ctx.searchInfos.forEach((info) => {
+				infos.forEach((info) => {
 					info.results = info.results.map((ans) => {
 						ans.answer = ans.answer ? ans.answer.trim() : '';
 						return ans;
 					});
 				});
+				ctx.searchInfos = infos;
 			} catch (err) {
-				error = String(err);
+				error = err instanceof Error ? err.message : String(err);
+			} finally {
+				if (timer) {
+					clearTimeout(timer);
+				}
 			}
 
 			result.ctx = ctx;
@@ -165,51 +210,70 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 			if (options?.enable_debug) {
 				console.log('搜题结果: ', ctx.searchInfos);
 			}
+
+			resolveQueue.push(index);
+			wake();
 			/** 回调 */
-			await this.opts.onResultsUpdate?.(results[index], index, results);
+			await notifyResultsUpdate(result, index);
 		};
 
-		const waitForRequested = async (result: WorkResult<E>) => {
-			const waitSeconds = AnswerWrapperHandlerConfig.timeout_seconds;
-			return new Promise<void>((resolve, reject) => {
-				const interval = setInterval(() => {
-					if (result?.requested === true) {
-						clearInterval(interval);
-						clearTimeout(timeout);
-						resolve();
-					}
-				}, 200);
-
-				const timeout = setTimeout(() => {
-					clearInterval(interval);
-					reject(new Error('答题超时！'));
-				}, (waitSeconds + 10 + (AnswerWrapperHandlerConfig.extra_wait_seconds || 0)) * 1000);
-			});
+		/** 搜题线程：从题目列表里依次领取题目搜索，最多 thread 个同时进行 */
+		const searchThreadCount = Math.max(1, Math.floor(this.opts.thread || 1));
+		let nextIndex = 0;
+		const searchThread = async () => {
+			while (this.isClose === false) {
+				const index = nextIndex++;
+				if (index >= results.length) {
+					return;
+				}
+				try {
+					await searchOne(index);
+				} catch (err) {
+					// 单题搜索出错不能让整个线程退出
+					console.error(err);
+				}
+			}
 		};
 
-		/** 答题线程， */
+		/** 答题线程：搜完一题答一题，答题动作串行执行 */
 		const resolverThread = async () => {
-			for (let index = 0; index < results.length; index++) {
-				const result = results[index];
+			let resolvedCount = 0;
 
-				let error: string | undefined;
-				let res: ResolverResult | undefined;
+			while (resolvedCount < results.length) {
 				/** 强行关闭 */
 				if (this.isClose === true) {
 					this.isRunning = false;
 					return;
 				}
 
-				try {
-					/** 检查是否暂停中 */
-					if (this.isStop) {
-						await waitForContinuate(() => this.isStop);
-					}
-					/** 等待搜题完毕 */
-					await waitForRequested(result);
-				} catch (err) {
-					// 超时错误
+				if (resolveQueue.length === 0) {
+					// 没有搜完的题目：等待唤醒（保留一个兜底定时器，避免遗漏唤醒）
+					await new Promise<void>((resolve) => {
+						const timer = setTimeout(resolve, 1000);
+						wakeResolver = () => {
+							clearTimeout(timer);
+							resolve();
+						};
+					});
+					continue;
 				}
+
+				/** 检查是否暂停中 */
+				if (this.isStop) {
+					await waitForContinuate(
+						() => this.isStop,
+						() => this.isClose
+					);
+					continue;
+				}
+
+				// 题号小的优先
+				resolveQueue.sort((a, b) => a - b);
+				const index = resolveQueue.shift() as number;
+				const result = results[index];
+
+				let error: string | undefined;
+				let res: ResolverResult | undefined;
 
 				try {
 					if (result.ctx && result.ctx.searchInfos.length !== 0) {
@@ -234,7 +298,7 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 							res = await work(result.ctx);
 						}
 					} else {
-						error = '搜索不到答案, 请重新运行, 或者忽略此题。';
+						error = result.error ? `搜题失败：${result.error}` : '搜索不到答案, 请重新运行, 或者忽略此题。';
 					}
 				} catch (err) {
 					error = (err as any)?.message || err;
@@ -246,6 +310,7 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 				result.result = res || { finish: false };
 				/** 设置答题完成 */
 				result.resolved = true;
+				resolvedCount++;
 
 				if (options?.enable_debug) {
 					console.log(
@@ -259,72 +324,14 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 				}
 
 				/** 回调 */
-				await this.opts.onResultsUpdate?.(result, index, results);
+				await notifyResultsUpdate(result, index);
 			}
 		};
 
-		/**
-		 * 搜题和答题分为两个线程
-		 */
-		/** 多线程搜题 */
-		const requestThreadHandler = async () => {
-			/** 线程锁 */
-			const locks: number[] = [];
-
-			const waitForLock = () => {
-				return new Promise<number>((resolve, reject) => {
-					const interval = setInterval(() => {
-						if (locks.length > 0) {
-							const lock = locks.shift();
-							if (lock) {
-								resolve(lock);
-								clearInterval(interval);
-								clearTimeout(timeout);
-							}
-						}
-					}, 100);
-
-					const timeout = setTimeout(() => {
-						clearInterval(interval);
-						reject(new Error('获取线程锁超时！'));
-					}, 3 * 60 * 1000);
-				});
-			};
-
-			const requestThreads: Function[] = [];
-			for (let index = 0; index < results.length; index++) {
-				requestThreads.push(() => requestThread(index));
-			}
-
-			for (let index = 0; index < (this.opts.thread || 1); index++) {
-				locks.push(index + 1);
-			}
-			let requestFinished = 0;
-
-			const promises: Function[] = [];
-			for (let index = 0; index < (this.opts.thread || 1); index++) {
-				promises.push(async () => {
-					try {
-						while (requestFinished < results.length && requestThreads.length > 0 && this.isClose === false) {
-							const thread = requestThreads.shift();
-							if (thread) {
-								const lock = await waitForLock();
-								await thread();
-								requestFinished++;
-								locks.push(lock);
-							}
-						}
-					} catch (err) {
-						console.error(err);
-					}
-				});
-			}
-
-			await Promise.all(promises.map((f) => f()));
-		};
-
-		/** 答题线程 */
-		await Promise.all([resolverThread(), requestThreadHandler()]);
+		await Promise.all([
+			resolverThread(),
+			...Array.from({ length: Math.min(searchThreadCount, results.length) }, () => searchThread())
+		]);
 
 		this.isRunning = false;
 		return results;
@@ -406,7 +413,10 @@ export class CustomOCSWorker extends CommonEventEmitter<WorkerEvents> {
 			}
 			/** 检查是否暂停中 */
 			if (this.isStop) {
-				await waitForContinuate(() => this.isStop);
+				await waitForContinuate(
+					() => this.isStop,
+					() => this.isClose
+				);
 			}
 
 			const question = questions[index];
@@ -456,11 +466,12 @@ export class CustomOCSWorker extends CommonEventEmitter<WorkerEvents> {
 	}
 }
 
-async function waitForContinuate(isStopping: () => boolean) {
+/** 暂停时等待继续；被关闭时也会返回，避免暂停中关闭导致永远卡住 */
+async function waitForContinuate(isStopping: () => boolean, isClosed: () => boolean = () => false) {
 	if (isStopping()) {
-		await new Promise<void>((resolve, reject) => {
+		await new Promise<void>((resolve) => {
 			const interval = setInterval(() => {
-				if (isStopping() === false) {
+				if (isStopping() === false || isClosed()) {
 					clearInterval(interval);
 					resolve();
 				}

@@ -432,11 +432,23 @@ export async function postChatStream(
 		return new Promise<MetoRequestResponse>((resolve, reject) => {
 			let finished = false;
 			let lastActivity = Date.now();
+			/** 收到过任何数据（包括 DeepSeek 排队时发送的 keep-alive 注释行） */
 			let sawProgress = false;
+			/** 收到过真正的 SSE 数据帧（data: ...）；排队中的请求只会收到 keep-alive，不算有进展 */
+			let sawData = false;
 
-			const touch = () => {
-				sawProgress = true;
-				lastActivity = Date.now();
+			const touch = (response?: any) => {
+				const text = typeof response?.responseText === 'string' ? response.responseText : '';
+				if (text) {
+					sawProgress = true;
+					if (!sawData && /(^|\n)\s*data:/.test(text)) {
+						sawData = true;
+					}
+				}
+				// 只有真正的数据才刷新“最近活动时间”，keep-alive 不能让排队中的请求一直被当成存活
+				if (sawData || !text) {
+					lastActivity = Date.now();
+				}
 			};
 			const finish = (action: () => void) => {
 				if (finished) {
@@ -516,8 +528,11 @@ export async function postChatStream(
 				if (done) {
 					break;
 				}
-				lastActivity = Date.now();
 				text += decoder.decode(value, { stream: true });
+				// keep-alive 注释行不算进展（服务端排队时只会发送它们）
+				if (/(^|\n)\s*data:/.test(text)) {
+					lastActivity = Date.now();
+				}
 			}
 		} else {
 			text = await response.text();
@@ -662,28 +677,39 @@ function toMetoResult(item: any): Result {
 }
 
 async function fillMetoHiddenAnswers(results: Result[], scene: SearchScene, question: string) {
-	for (const result of results) {
-		const extraData = (result.extra_data || {}) as Record<string, any>;
-		if (extraData.hideAnswer && extraData.problemId) {
-			try {
-				const answer = await fetchMetoRealAnswer(Number(extraData.problemId), scene, question);
-				result.answer = answer.answer;
-				result.extra_data = {
-					...extraData,
-					hideAnswer: false,
-					userAnswer: answer.userAnswer,
-					createBy: answer.createBy,
-					verifyStatus: answer.verifyStatus,
-					realAnswer: true
-				};
-			} catch (error) {
-				$searchConsole.warn(`MeTo 获取真实答案失败: ${problemIdText(extraData.problemId)}`, {
-					question,
-					error: stringifyError(error)
-				});
+	// 并行获取真实答案（每道题最多 5 条结果），避免逐条请求把一道题拖到十几秒
+	await Promise.all(
+		results.map(async (result) => {
+			const extraData = (result.extra_data || {}) as Record<string, any>;
+			if (!extraData.hideAnswer) {
+				return;
 			}
-		}
-	}
+			if (extraData.problemId) {
+				try {
+					const answer = await fetchMetoRealAnswer(Number(extraData.problemId), scene, question);
+					result.answer = answer.answer;
+					result.extra_data = {
+						...extraData,
+						hideAnswer: false,
+						userAnswer: answer.userAnswer,
+						createBy: answer.createBy,
+						verifyStatus: answer.verifyStatus,
+						realAnswer: true
+					};
+					return;
+				} catch (error) {
+					$searchConsole.warn(`MeTo 获取真实答案失败: ${problemIdText(extraData.problemId)}`, {
+						question,
+						error: stringifyError(error)
+					});
+				}
+			}
+			// 仍然是隐藏状态：此时 answer 只是“脚本版本过低”之类的提示文字，不是答案，必须清掉，
+			// 否则会被当成答案参与匹配
+			result.extra_data = { ...extraData, hiddenNotice: result.answer };
+			result.answer = '';
+		})
+	);
 }
 
 function problemIdText(problemId: any) {
@@ -725,6 +751,16 @@ async function searchMetoQuestion(wrapper: AnswererWrapper, env: SearchEnv, scen
 			});
 		}
 		results = filteredResults;
+		// 自动答题：先丢掉题干明显不相关的结果，只为相关的结果获取真实答案（省掉大量无用请求）
+		if (scene === 'auto') {
+			const related = results.filter((result) => isRelatedQuestion(title, result.question));
+			if (related.length !== results.length) {
+				$searchConsole.info(`MeTo 丢弃了 ${results.length - related.length} 条与题目不相关的结果`, {
+					question: title
+				});
+			}
+			results = related;
+		}
 		await fillMetoHiddenAnswers(results, scene, title);
 
 		$searchConsole.info(`MeTo 搜题完成，命中 ${results.length} 条`, {
@@ -877,6 +913,8 @@ const AI_STORE_KEYS = {
 export const DEFAULT_AI_MAX_WAIT_SECONDS = 600;
 /** 流式传输时，超过这个时间没有收到任何数据，认为连接已经卡死（毫秒） */
 const AI_IDLE_TIMEOUT = 120 * 1000;
+/** 单次 AI 请求的最长时间（毫秒）；超过后放弃并重发（总时限仍受“单题最长等待”约束） */
+const AI_ATTEMPT_MAX_MS = 300 * 1000;
 /** 剩余时间低于这个值时，不再发起新的可选请求（联网搜索、重新作答），避免超过总时限 */
 const AI_MIN_REMAINING_FOR_OPTIONAL = 20 * 1000;
 const AI_SYSTEM_PROMPT = [
@@ -1223,11 +1261,19 @@ async function postJsonWithRetry(
 	stream = false
 ) {
 	let lastError: unknown;
+	// timeout 是整道题的总预算，所有重试共用，避免“每次重试都重新计时”导致实际等待远超设置
+	const deadline = Date.now() + timeout;
 	for (let attempt = 0; attempt <= 2; attempt++) {
+		const left = deadline - Date.now();
+		if (attempt > 0 && left < 5000) {
+			break;
+		}
+		// 单次请求不超过 AI_ATTEMPT_MAX_MS：服务端排队卡死时尽快放弃并重发，而不是傻等到总时限
+		const attemptMs = Math.max(5000, Math.min(left, AI_ATTEMPT_MAX_MS));
 		try {
 			const response = stream
-				? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: timeout })
-				: await postJson(url, body, headers, timeout);
+				? await postChatStream(url, body, headers, { idleMs: AI_IDLE_TIMEOUT, totalMs: attemptMs })
+				: await postJson(url, body, headers, attemptMs);
 			const retryable =
 				response.status === 408 ||
 				response.status === 409 ||
@@ -1242,10 +1288,10 @@ async function postJsonWithRetry(
 			return response;
 		} catch (error) {
 			lastError = error;
-			if (attempt >= 1) {
+			if (attempt >= 2) {
 				break;
 			}
-			$searchConsole.warn(`AI 请求出错（${stringifyError(error)}），准备重试`);
+			$searchConsole.warn(`AI 请求出错（${stringifyError(error)}），准备第 ${attempt + 1} 次重试`);
 			await $.sleep(1500);
 		}
 	}
@@ -1311,6 +1357,39 @@ function mergeOptionLabelLines(text: string) {
 	return merged.join('\n');
 }
 
+/**
+ * AI 服务熔断：服务繁忙 / 排队 / 网络故障时，每道题都要白白等满总时限（默认 10 分钟），
+ * 一个章节二十道题就是几个小时。连续失败达到阈值后暂停一段时间，期间的题目立刻按“AI 不可用”处理，
+ * 冷却结束后再放行一道题试探，成功则恢复。
+ */
+const AI_BREAKER_THRESHOLD = 3;
+const AI_BREAKER_COOLDOWN_MS = 60 * 1000;
+const AI_BREAKER_MAX_COOLDOWN_MS = 5 * 60 * 1000;
+let aiServiceFailureStreak = 0;
+let aiBreakerUntil = 0;
+let aiBreakerCooldown = AI_BREAKER_COOLDOWN_MS;
+
+function recordAiServiceResult(ok: boolean) {
+	if (ok) {
+		aiServiceFailureStreak = 0;
+		aiBreakerCooldown = AI_BREAKER_COOLDOWN_MS;
+		return;
+	}
+	aiServiceFailureStreak++;
+	if (aiServiceFailureStreak >= AI_BREAKER_THRESHOLD) {
+		aiBreakerUntil = Date.now() + aiBreakerCooldown;
+		$searchConsole.warn(
+			`AI 服务连续 ${aiServiceFailureStreak} 次请求失败（繁忙或网络异常），暂停 AI 答题 ${Math.round(
+				aiBreakerCooldown / 1000
+			)} 秒，期间的题目会直接跳过 AI。`
+		);
+		$debug.warn('ai', '熔断', { streak: aiServiceFailureStreak, cooldownMs: aiBreakerCooldown });
+		aiBreakerCooldown = Math.min(AI_BREAKER_MAX_COOLDOWN_MS, aiBreakerCooldown * 2);
+		// 冷却结束后只给一次试探机会：再失败一次就重新熔断
+		aiServiceFailureStreak = AI_BREAKER_THRESHOLD - 1;
+	}
+}
+
 async function searchAiQuestionInner(env: SearchEnv, scene: SearchScene): Promise<SearchInformation | undefined> {
 	const config = getAiConfig();
 	if (!config.enable) {
@@ -1320,6 +1399,19 @@ async function searchAiQuestionInner(env: SearchEnv, scene: SearchScene): Promis
 	const title = String(env.title || '').trim();
 	if (!title) {
 		return undefined;
+	}
+
+	if (Date.now() < aiBreakerUntil) {
+		const seconds = Math.ceil((aiBreakerUntil - Date.now()) / 1000);
+		$searchConsole.warn(`AI 服务近期连续失败，暂时跳过 AI（约 ${seconds} 秒后重试）: ${title}`);
+		notifyAiFailure(title, `AI 服务近期连续失败，暂停 ${seconds} 秒`);
+		return createEmptySearchInfo(
+			createAiWrapper(
+				/\/chat\/completions$/.test(config.baseUrl) ? config.baseUrl : `${config.baseUrl}/chat/completions`,
+				config.model
+			),
+			'AI 服务近期连续失败，已暂时跳过'
+		);
 	}
 
 	const url = /\/chat\/completions$/.test(config.baseUrl) ? config.baseUrl : `${config.baseUrl}/chat/completions`;
@@ -1542,6 +1634,9 @@ async function searchAiQuestionInner(env: SearchEnv, scene: SearchScene): Promis
 					continue;
 				}
 
+				if (response.status === 429 || response.status >= 500) {
+					recordAiServiceResult(false);
+				}
 				$searchConsole.error(`AI 答题请求失败: ${title}`, { status: response.status, message });
 				notifyAiFailure(
 					title,
@@ -1551,6 +1646,8 @@ async function searchAiQuestionInner(env: SearchEnv, scene: SearchScene): Promis
 				return createEmptySearchInfo(wrapper, `AI 请求失败：${message}`);
 			}
 
+			// 服务正常响应（即使内容为空 / 答不出来）说明服务是通的
+			recordAiServiceResult(true);
 			const content = String(response.json?.choices?.[0]?.message?.content || '');
 			const parsed = content ? parseAiContent(content) : undefined;
 			if (!parsed) {
@@ -1723,6 +1820,7 @@ async function searchAiQuestionInner(env: SearchEnv, scene: SearchScene): Promis
 		notifyAiFailure(title, 'AI 返回内容为空或格式错误');
 		return createEmptySearchInfo(wrapper, 'AI 返回内容为空或格式错误');
 	} catch (error) {
+		recordAiServiceResult(false);
 		$searchConsole.error(`AI 答题失败: ${title}`, { scene, error: stringifyError(error) });
 		notifyAiFailure(title, stringifyError(error).slice(0, 80));
 		return createEmptySearchInfo(wrapper, stringifyError(error));
@@ -1752,6 +1850,27 @@ function stripUrls(text: string) {
 }
 
 /**
+ * 题库返回的题干是否就是要搜索的这道题：题库没有返回题干（无法判断）时视为是，
+ * 否则题干必须与题目足够相似（或互相包含）。题库模糊搜索经常返回完全不相关的题目。
+ */
+export function isRelatedQuestion(title: string, question?: string) {
+	const stripped = stripUrls(question || '');
+	const nq = normalizeText(stripped);
+	if (!nq) {
+		return true;
+	}
+
+	const target = stripUrls(title);
+	const nt = normalizeText(target);
+	// 题库的题干包含了要搜索的题目（或相反），例如题库题干带有额外的描述
+	if (Math.min(nq.length, nt.length) >= 6 && (nq.includes(nt) || nt.includes(nq))) {
+		return true;
+	}
+
+	return textSimilarity(target, stripped) >= CREDIBLE_SIMILARITY;
+}
+
+/**
  * 判断一条题库结果是否可信：有实际答案，并且题干与要搜索的题目足够相似。
  * 题库没有返回题干（无法判断）或结果来自本地缓存时，视为可信。
  */
@@ -1767,20 +1886,7 @@ export function isCredibleAnswer(title: string, result: { question?: string; ans
 		return true;
 	}
 
-	const question = stripUrls(result.question || '');
-	if (!normalizeText(question)) {
-		return true;
-	}
-
-	const target = stripUrls(title);
-	const nq = normalizeText(question);
-	const nt = normalizeText(target);
-	// 题库的题干包含了要搜索的题目（或相反），例如题库题干带有额外的描述
-	if (Math.min(nq.length, nt.length) >= 6 && (nq.includes(nt) || nt.includes(nq))) {
-		return true;
-	}
-
-	return textSimilarity(target, question) >= CREDIBLE_SIMILARITY;
+	return isRelatedQuestion(title, result.question);
 }
 
 /**
@@ -1868,6 +1974,22 @@ export async function searchAnswerInWrappers(wrappers: AnswererWrapper[], env: S
 				infos.unshift(aiInfo);
 			} else {
 				infos.push(aiInfo);
+			}
+		}
+	}
+
+	// 自动答题只使用可信的结果：题库模糊搜索返回的不相关题目（例如搜“等焓过程…”返回“电机产生的热量…”）
+	// 如果交给答题器，判断题会直接拿里面的“对 / T”去作答，造成答非所问。手动搜题保留全部结果供查看。
+	if (scene === 'auto') {
+		const title = String(env.title || '');
+		for (const info of infos) {
+			const before = info.results.length;
+			info.results = info.results.filter((result) => isCredibleAnswer(title, result));
+			if (before !== info.results.length) {
+				$debug.log('answerer', `${info.name} 丢弃了不相关或无答案的结果`, {
+					title: title.slice(0, 40),
+					dropped: before - info.results.length
+				});
 			}
 		}
 	}
